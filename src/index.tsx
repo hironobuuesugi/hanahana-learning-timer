@@ -1387,6 +1387,49 @@ async function initApp() {
 
 // アプリ起動
 initApp();
+
+// =============================================
+// ブラウザ離脱時の凍結処理
+//
+// ブラウザを閉じる / タブを閉じる / ページ離脱 のタイミングで
+// タイマーが running/paused の場合に /api/timer/freeze を呼び出す。
+//
+// ★ fetch は使わない（ブラウザが即座に切断するため非同期は届かない）
+// ★ navigator.sendBeacon を使う（ページ離脱後も確実にリクエストが届く）
+//
+// 対応イベント:
+//   pagehide  ... ブラウザを閉じる / タブを閉じる / ページ遷移
+//               （beforeunload より信頼性が高い・iOS Safariにも対応）
+//   visibilitychange (hidden) ... タブを切り替えた時の補完
+//               （pagehide が発火しないケースの保険）
+// =============================================
+
+function freezeOnLeave() {
+  // タイマーが running/paused の時だけ送信する
+  if (!timerState) return;
+  if (timerState.status !== 'running' && timerState.status !== 'paused') return;
+
+  // sendBeacon: ページ離脱後もブラウザがバックグラウンドで送信を完了させる
+  // Content-Type は text/plain のみ指定可能だが、
+  // サーバー側で Cookie を読む必要があるため Blob で送る
+  try {
+    navigator.sendBeacon('/api/timer/freeze', new Blob([], { type: 'application/json' }));
+  } catch (e) {
+    // sendBeacon 未対応環境（古いブラウザ）では無視
+  }
+}
+
+// pagehide: ブラウザを閉じる・タブを閉じる・URL 変更すべてに対応
+// （beforeunload は非同期処理を保証しないため使わない）
+window.addEventListener('pagehide', freezeOnLeave);
+
+// visibilitychange: タブが非表示になった瞬間も補完として発火
+// （iOS Safari では pagehide より先に hidden になるため）
+document.addEventListener('visibilitychange', function() {
+  if (document.visibilityState === 'hidden') {
+    freezeOnLeave();
+  }
+});
 </script>
 </body>
 </html>`)
