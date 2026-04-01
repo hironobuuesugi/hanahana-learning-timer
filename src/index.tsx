@@ -10,6 +10,7 @@ import authRoutes from './routes/auth'
 import timerRoutes from './routes/timer'
 import statsRoutes from './routes/stats'
 import recordsRoutes from './routes/records'
+import testdateRoutes from './routes/testdate'
 import { authMiddleware } from './middleware/auth'
 import type { Bindings, Variables } from './types'
 
@@ -34,6 +35,7 @@ app.route('/api/auth', authRoutes)
 app.route('/api/timer', timerRoutes)
 app.route('/api/stats', statsRoutes)
 app.route('/api/records', recordsRoutes)
+app.route('/api/testdate', testdateRoutes)
 
 // =============================================
 // フロントエンドページ（SPA形式）
@@ -425,6 +427,36 @@ app.get('*', (c) => {
             <p class="text-lg font-bold text-green-600" id="home-stats-total">--</p>
           </div>
         </div>
+      </div>
+
+      <!-- テスト日カード -->
+      <div class="card p-4 mb-6" id="testdate-card">
+        <h3 class="text-sm font-medium text-gray-500 mb-3 flex items-center gap-2">
+          <i class="fas fa-calendar-check text-orange-400"></i>
+          テスト日
+        </h3>
+        <!-- 保存済みテスト日の表示 -->
+        <div id="testdate-display" class="mb-3 hidden">
+          <p class="text-sm text-gray-500 mb-1">登録中のテスト日</p>
+          <p class="text-lg font-bold text-orange-500" id="testdate-value">--</p>
+        </div>
+        <!-- 入力フォーム -->
+        <div class="flex gap-2 items-center">
+          <input
+            type="date"
+            id="testdate-input"
+            class="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-orange-300 focus:ring-1 focus:ring-orange-200"
+          />
+          <button
+            id="testdate-save-btn"
+            onclick="saveTestDate()"
+            class="bg-orange-400 hover:bg-orange-500 text-white text-sm font-medium px-4 py-2 rounded-xl transition-colors whitespace-nowrap"
+          >保存</button>
+        </div>
+        <!-- 保存メッセージ（一時表示） -->
+        <p id="testdate-msg" class="text-xs text-green-600 mt-2 hidden"></p>
+        <!-- エラーメッセージ -->
+        <p id="testdate-err" class="text-xs text-red-500 mt-2 hidden"></p>
       </div>
 
       <!-- 機能カード一覧（今後の機能を予告） -->
@@ -1038,6 +1070,8 @@ function updateHomeScreen(user) {
 
   // 勉強時間集計を非同期で取得して表示（既存機能に影響しない）
   fetchAndRenderStats();
+  // テスト日を非同期で取得して表示
+  fetchTestDate();
 }
 
 // フォームタグのonsubmitでEnterキー送信をハンドリング済み
@@ -1085,6 +1119,84 @@ async function fetchAndRenderStats() {
   } catch (e) {
     // ネットワークエラーは集計欄を "--" のまま無視（既存機能に影響しない）
     console.warn('Stats fetch error:', e);
+  }
+}
+
+// =============================================
+// テスト日機能 - 取得・保存
+// =============================================
+
+// テスト日をAPIから取得してホーム画面に表示する
+async function fetchTestDate() {
+  try {
+    var res  = await fetch('/api/testdate');
+    var json = await res.json();
+    if (!json.success) return;
+    var dateVal = json.test_date;
+    var displayEl = document.getElementById('testdate-display');
+    var valueEl   = document.getElementById('testdate-value');
+    if (dateVal && displayEl && valueEl) {
+      valueEl.textContent = dateVal;
+      displayEl.classList.remove('hidden');
+    } else if (displayEl) {
+      displayEl.classList.add('hidden');
+    }
+  } catch (e) {
+    console.warn('TestDate fetch error:', e);
+  }
+}
+
+// テスト日を保存する（バリデーション付き）
+async function saveTestDate() {
+  var inputEl = document.getElementById('testdate-input');
+  var msgEl   = document.getElementById('testdate-msg');
+  var errEl   = document.getElementById('testdate-err');
+  var btnEl   = document.getElementById('testdate-save-btn');
+
+  // メッセージをリセット
+  if (msgEl) { msgEl.textContent = ''; msgEl.classList.add('hidden'); }
+  if (errEl) { errEl.textContent = ''; errEl.classList.add('hidden'); }
+
+  var dateVal = inputEl ? inputEl.value.trim() : '';
+
+  // バリデーション: 日付未入力
+  if (!dateVal) {
+    if (errEl) { errEl.textContent = 'テスト日を入力してください'; errEl.classList.remove('hidden'); }
+    return;
+  }
+
+  // 保存中はボタンを無効化
+  if (btnEl) { btnEl.disabled = true; btnEl.textContent = '保存中...'; }
+
+  try {
+    var res = await fetch('/api/testdate', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ test_date: dateVal }),
+    });
+    var json = await res.json();
+
+    if (json.success) {
+      // 表示を更新
+      var displayEl = document.getElementById('testdate-display');
+      var valueEl   = document.getElementById('testdate-value');
+      if (valueEl)   valueEl.textContent = json.test_date;
+      if (displayEl) displayEl.classList.remove('hidden');
+
+      // 成功メッセージを3秒表示
+      if (msgEl) {
+        msgEl.textContent = 'テスト日を保存しました';
+        msgEl.classList.remove('hidden');
+        setTimeout(function() { msgEl.classList.add('hidden'); }, 3000);
+      }
+    } else {
+      if (errEl) { errEl.textContent = json.error || '保存に失敗しました'; errEl.classList.remove('hidden'); }
+    }
+  } catch (e) {
+    if (errEl) { errEl.textContent = '通信エラーが発生しました'; errEl.classList.remove('hidden'); }
+    console.warn('TestDate save error:', e);
+  } finally {
+    if (btnEl) { btnEl.disabled = false; btnEl.textContent = '保存'; }
   }
 }
 
