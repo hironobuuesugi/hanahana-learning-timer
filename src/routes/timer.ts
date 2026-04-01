@@ -468,40 +468,48 @@ timer.post('/finish-frozen', async (c) => {
 // POST /api/timer/record - 教科・勉強内容を記録する
 //
 // フィニッシュ後（status = 'finished'）のセッションに
-// subject（教科）と memo（勉強内容）を保存する。
+// subjects（教科・複数可）と memo（勉強内容）を保存する。
 //
-// body: { session_id: number, subject: string, memo: string }
+// body: { session_id: number, subjects: string[], memo: string }
 //
-// subject の有効値:
+// subjects の有効値（複数選択可・1件以上必須）:
 //   'english' | 'math' | 'japanese' | 'science' | 'social' | 'other'
+//
+// DB には subject カラムにカンマ区切り文字列で保存する。
+//   例: ['english', 'math'] → 'english,math'
 // =============================================
 timer.post('/record', async (c) => {
   const userId = c.get('userId');
   const db = c.env.DB;
 
-  let body: { session_id?: unknown; subject?: unknown; memo?: unknown };
+  let body: { session_id?: unknown; subjects?: unknown; memo?: unknown };
   try {
     body = await c.req.json();
   } catch {
     return c.json({ success: false, error: 'リクエストの形式が正しくありません' }, 400);
   }
 
-  const { session_id, subject, memo } = body;
+  const { session_id, subjects, memo } = body;
 
-  // バリデーション
+  // バリデーション: session_id
   if (!session_id || typeof session_id !== 'number') {
     return c.json({ success: false, error: 'session_id が必要です' }, 400);
   }
-  if (!subject || typeof subject !== 'string') {
-    return c.json({ success: false, error: '教科を選択してください' }, 400);
+
+  // バリデーション: subjects（配列・1件以上）
+  if (!Array.isArray(subjects) || (subjects as unknown[]).length === 0) {
+    return c.json({ success: false, error: '教科を1つ以上選択してください' }, 400);
   }
-  if (!memo || typeof memo !== 'string' || (memo as string).trim() === '') {
-    return c.json({ success: false, error: '勉強内容を入力してください' }, 400);
+  const validSubjects = ['english', 'math', 'japanese', 'science', 'social', 'other'];
+  for (const s of subjects as unknown[]) {
+    if (typeof s !== 'string' || !validSubjects.includes(s)) {
+      return c.json({ success: false, error: '無効な教科が含まれています' }, 400);
+    }
   }
 
-  const validSubjects = ['english', 'math', 'japanese', 'science', 'social', 'other'];
-  if (!validSubjects.includes(subject as string)) {
-    return c.json({ success: false, error: '無効な教科です' }, 400);
+  // バリデーション: memo
+  if (!memo || typeof memo !== 'string' || (memo as string).trim() === '') {
+    return c.json({ success: false, error: '勉強内容を入力してください' }, 400);
   }
 
   // セッションが自分のもので、finished であることを確認
@@ -519,14 +527,18 @@ timer.post('/record', async (c) => {
   }
 
   const now = new Date().toISOString();
+  // 複数教科はカンマ区切り文字列として保存
+  const subjectStr = (subjects as string[]).join(',');
+  const memoTrimmed = (memo as string).trim();
+
   await db.prepare(
     `UPDATE study_sessions SET subject = ?, memo = ?, updated_at = ? WHERE id = ?`
-  ).bind(subject, (memo as string).trim(), now, session_id).run();
+  ).bind(subjectStr, memoTrimmed, now, session_id).run();
 
   return c.json({
     success: true,
     message: '記録しました！',
-    data: { session_id, subject, memo: (memo as string).trim() },
+    data: { session_id, subjects: subjects as string[], subject: subjectStr, memo: memoTrimmed },
   });
 });
 

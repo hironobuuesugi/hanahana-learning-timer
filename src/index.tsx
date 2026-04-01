@@ -1433,8 +1433,8 @@ async function handleAbandonedFinish() {
 // 勉強記録入力ダイアログ
 // =============================================
 
-// 記録ダイアログで選択された教科（内部変数）
-let recordSelectedSubject = null;
+// 記録ダイアログで選択された教科（複数選択対応・Set で管理）
+let recordSelectedSubjects = new Set();
 // 記録対象のセッションID
 let recordSessionId = null;
 
@@ -1445,7 +1445,7 @@ let recordSessionId = null;
 // -----------------------------------------------
 function showRecordDialog(sessionId, totalSeconds) {
   recordSessionId = sessionId;
-  recordSelectedSubject = null;
+  recordSelectedSubjects = new Set(); // 選択状態をリセット
 
   // 時間表示を設定
   const timeEl = document.getElementById('record-dialog-time');
@@ -1473,20 +1473,27 @@ function showRecordDialog(sessionId, totalSeconds) {
 }
 
 // -----------------------------------------------
-// 教科ボタン選択ハンドラ
+// 教科ボタン選択ハンドラ（複数選択トグル式）
+// 押すと選択、もう一度押すと解除
 // -----------------------------------------------
 function selectSubject(subject) {
-  recordSelectedSubject = subject;
-  // 全ボタンのスタイルをリセット
-  document.querySelectorAll('.subject-btn').forEach(btn => {
-    btn.classList.remove('border-pink-400', 'bg-pink-50', 'text-pink-600');
-    btn.classList.add('border-gray-200', 'text-gray-600');
-  });
-  // 選択中のボタンをハイライト
-  const selectedBtn = document.querySelector('[data-subject="' + subject + '"]');
-  if (selectedBtn) {
-    selectedBtn.classList.remove('border-gray-200', 'text-gray-600');
-    selectedBtn.classList.add('border-pink-400', 'bg-pink-50', 'text-pink-600');
+  if (recordSelectedSubjects.has(subject)) {
+    // 選択済み → 解除
+    recordSelectedSubjects.delete(subject);
+  } else {
+    // 未選択 → 追加
+    recordSelectedSubjects.add(subject);
+  }
+  // ボタンのスタイルを選択状態に同期
+  const btn = document.querySelector('[data-subject="' + subject + '"]');
+  if (btn) {
+    if (recordSelectedSubjects.has(subject)) {
+      btn.classList.remove('border-gray-200', 'text-gray-600');
+      btn.classList.add('border-pink-400', 'bg-pink-50', 'text-pink-600');
+    } else {
+      btn.classList.remove('border-pink-400', 'bg-pink-50', 'text-pink-600');
+      btn.classList.add('border-gray-200', 'text-gray-600');
+    }
   }
 }
 
@@ -1500,10 +1507,10 @@ async function handleRecordSave() {
     errEl.textContent = '';
   }
 
-  // バリデーション
-  if (!recordSelectedSubject) {
+  // バリデーション: 教科（1つ以上必須）
+  if (recordSelectedSubjects.size === 0) {
     if (errEl) {
-      errEl.textContent = '教科を選択してください';
+      errEl.textContent = '教科を1つ以上選択してください';
       errEl.classList.remove('hidden');
     }
     return;
@@ -1527,7 +1534,7 @@ async function handleRecordSave() {
       credentials: 'include',
       body: JSON.stringify({
         session_id: recordSessionId,
-        subject: recordSelectedSubject,
+        subjects: Array.from(recordSelectedSubjects), // Set → 配列に変換して送信
         memo: memo,
       }),
     });
