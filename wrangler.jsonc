@@ -1,0 +1,18 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "hanahana-learning-timer",
+  "compatibility_date": "2026-04-01",
+  "pages_build_output_dir": "./dist",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  // D1 データベース設定
+  // ローカル開発では --local フラグで自動的にローカルSQLiteを使用
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "hanahana-production",
+      "database_id": "local-placeholder-id"
+    }
+  ]
+}
