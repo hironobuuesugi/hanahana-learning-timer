@@ -583,6 +583,9 @@ app.get('*', (c) => {
       <!-- エラーメッセージ -->
       <div id="timer-error" class="hidden error-msg bg-red-50 border border-red-200 text-red-600 text-sm rounded-lg p-3 mb-4 text-center"></div>
 
+      <!-- 成功メッセージ -->
+      <div id="timer-success" class="hidden bg-green-50 border border-green-200 text-green-700 text-sm rounded-lg p-3 mb-4 text-center font-medium"></div>
+
     </main>
   </div>
 </div>
@@ -641,6 +644,95 @@ app.get('*', (c) => {
       </button>
     </div>
 
+  </div>
+</div>
+
+<!-- =============================================
+     勉強記録入力ダイアログ（フィニッシュ後に表示）
+     ============================================= -->
+<div id="record-dialog" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-end sm:items-center justify-center z-50 p-4">
+  <div class="bg-white rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden">
+
+    <!-- ダイアログヘッダー -->
+    <div class="bg-gradient-to-r from-pink-400 to-purple-400 px-6 py-4 text-white text-center">
+      <div class="text-3xl mb-1">📝</div>
+      <h2 class="text-lg font-bold">勉強を記録しよう！</h2>
+      <p class="text-sm opacity-80 mt-1">今回の勉強時間: <span id="record-dialog-time" class="font-bold">-</span></p>
+    </div>
+
+    <!-- 入力フォーム -->
+    <div class="px-6 py-5 space-y-4">
+
+      <!-- エラーメッセージ -->
+      <div id="record-error" class="hidden bg-red-50 border border-red-200 text-red-600 text-sm rounded-lg p-3 text-center"></div>
+
+      <!-- 教科選択 -->
+      <div>
+        <label class="block text-sm font-bold text-gray-700 mb-2">
+          <i class="fas fa-book text-pink-400 mr-1"></i>
+          教科 <span class="text-red-400">*</span>
+        </label>
+        <div id="record-subject-buttons" class="grid grid-cols-3 gap-2">
+          <button type="button" data-subject="japanese"
+            onclick="selectSubject('japanese')"
+            class="subject-btn py-3 rounded-xl text-sm font-medium border-2 border-gray-200 text-gray-600 hover:border-pink-300 hover:text-pink-600 transition-all">
+            国語
+          </button>
+          <button type="button" data-subject="math"
+            onclick="selectSubject('math')"
+            class="subject-btn py-3 rounded-xl text-sm font-medium border-2 border-gray-200 text-gray-600 hover:border-pink-300 hover:text-pink-600 transition-all">
+            数学・算数
+          </button>
+          <button type="button" data-subject="english"
+            onclick="selectSubject('english')"
+            class="subject-btn py-3 rounded-xl text-sm font-medium border-2 border-gray-200 text-gray-600 hover:border-pink-300 hover:text-pink-600 transition-all">
+            英語
+          </button>
+          <button type="button" data-subject="science"
+            onclick="selectSubject('science')"
+            class="subject-btn py-3 rounded-xl text-sm font-medium border-2 border-gray-200 text-gray-600 hover:border-pink-300 hover:text-pink-600 transition-all">
+            理科
+          </button>
+          <button type="button" data-subject="social"
+            onclick="selectSubject('social')"
+            class="subject-btn py-3 rounded-xl text-sm font-medium border-2 border-gray-200 text-gray-600 hover:border-pink-300 hover:text-pink-600 transition-all">
+            社会
+          </button>
+          <button type="button" data-subject="other"
+            onclick="selectSubject('other')"
+            class="subject-btn py-3 rounded-xl text-sm font-medium border-2 border-gray-200 text-gray-600 hover:border-pink-300 hover:text-pink-600 transition-all">
+            その他
+          </button>
+        </div>
+      </div>
+
+      <!-- 勉強内容 -->
+      <div>
+        <label for="record-memo" class="block text-sm font-bold text-gray-700 mb-2">
+          <i class="fas fa-pencil-alt text-purple-400 mr-1"></i>
+          勉強内容 <span class="text-red-400">*</span>
+        </label>
+        <textarea
+          id="record-memo"
+          placeholder="例: 二次方程式の練習問題を解いた"
+          rows="3"
+          maxlength="200"
+          class="w-full border-2 border-gray-200 rounded-xl px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-pink-300 resize-none placeholder-gray-300"
+        ></textarea>
+        <p class="text-xs text-gray-400 text-right mt-1">最大200文字</p>
+      </div>
+
+      <!-- 保存ボタン -->
+      <button
+        id="record-save-btn"
+        onclick="handleRecordSave()"
+        class="w-full bg-gradient-to-r from-pink-400 to-purple-400 hover:from-pink-500 hover:to-purple-500 text-white font-bold py-4 rounded-xl flex items-center justify-center gap-2 shadow-md transition-all"
+      >
+        <i class="fas fa-save"></i>
+        保存する
+      </button>
+
+    </div>
   </div>
 </div>
 
@@ -1164,20 +1256,17 @@ async function handleTimerFinish() {
       const display = document.getElementById('timer-display');
       if (display) display.textContent = formatSecondsDisplay(timerState.total_seconds);
 
-      // 結果カードを表示
-      const resultCard = document.getElementById('timer-result-card');
-      const resultTime = document.getElementById('timer-result-time');
-      if (resultTime) resultTime.textContent = formatSecondsJa(timerState.total_seconds);
-      if (resultCard) resultCard.classList.remove('hidden');
-
-      renderTimerUI();
       stopTimerTick();
+      renderTimerUI();
+
+      // 記録入力ダイアログを表示
+      showRecordDialog(timerState.session_id, timerState.total_seconds);
     } else {
       showTimerError(data.error || 'フィニッシュに失敗しました');
+      setButtonDisabled('btn-finish', false);
     }
   } catch (err) {
     showTimerError('通信エラーが発生しました');
-  } finally {
     setButtonDisabled('btn-finish', false);
   }
 }
@@ -1322,14 +1411,11 @@ async function handleAbandonedFinish() {
       const display = document.getElementById('timer-display');
       if (display) display.textContent = formatSecondsDisplay(timerState.total_seconds);
 
-      // 結果カードを表示
-      const resultCard = document.getElementById('timer-result-card');
-      const resultTime = document.getElementById('timer-result-time');
-      if (resultTime) resultTime.textContent = formatSecondsJa(timerState.total_seconds);
-      if (resultCard) resultCard.classList.remove('hidden');
-
-      renderTimerUI();
       stopTimerTick();
+      renderTimerUI();
+
+      // 記録入力ダイアログを表示
+      showRecordDialog(timerState.session_id, timerState.total_seconds);
 
     } else {
       showTimerError(data.error || '終了処理に失敗しました。もう一度お試しください');
@@ -1343,6 +1429,139 @@ async function handleAbandonedFinish() {
   }
 }
 
+// =============================================
+// 勉強記録入力ダイアログ
+// =============================================
+
+// 記録ダイアログで選択された教科（内部変数）
+let recordSelectedSubject = null;
+// 記録対象のセッションID
+let recordSessionId = null;
+
+// -----------------------------------------------
+// 記録ダイアログを表示する
+// sessionId: 対象セッションID
+// totalSeconds: 今回の勉強秒数
+// -----------------------------------------------
+function showRecordDialog(sessionId, totalSeconds) {
+  recordSessionId = sessionId;
+  recordSelectedSubject = null;
+
+  // 時間表示を設定
+  const timeEl = document.getElementById('record-dialog-time');
+  if (timeEl) timeEl.textContent = formatSecondsJa(totalSeconds);
+
+  // 前回の入力をリセット
+  const memoEl = document.getElementById('record-memo');
+  if (memoEl) memoEl.value = '';
+
+  // 教科ボタンの選択状態をリセット
+  document.querySelectorAll('.subject-btn').forEach(btn => {
+    btn.classList.remove('border-pink-400', 'bg-pink-50', 'text-pink-600');
+    btn.classList.add('border-gray-200', 'text-gray-600');
+  });
+
+  // エラーを隠す
+  const errEl = document.getElementById('record-error');
+  if (errEl) errEl.classList.add('hidden');
+
+  // 保存ボタンを有効化
+  setButtonDisabled('record-save-btn', false);
+
+  // ダイアログを表示
+  document.getElementById('record-dialog').classList.remove('hidden');
+}
+
+// -----------------------------------------------
+// 教科ボタン選択ハンドラ
+// -----------------------------------------------
+function selectSubject(subject) {
+  recordSelectedSubject = subject;
+  // 全ボタンのスタイルをリセット
+  document.querySelectorAll('.subject-btn').forEach(btn => {
+    btn.classList.remove('border-pink-400', 'bg-pink-50', 'text-pink-600');
+    btn.classList.add('border-gray-200', 'text-gray-600');
+  });
+  // 選択中のボタンをハイライト
+  const selectedBtn = document.querySelector('[data-subject="' + subject + '"]');
+  if (selectedBtn) {
+    selectedBtn.classList.remove('border-gray-200', 'text-gray-600');
+    selectedBtn.classList.add('border-pink-400', 'bg-pink-50', 'text-pink-600');
+  }
+}
+
+// -----------------------------------------------
+// 記録保存ハンドラ
+// -----------------------------------------------
+async function handleRecordSave() {
+  const errEl = document.getElementById('record-error');
+  if (errEl) {
+    errEl.classList.add('hidden');
+    errEl.textContent = '';
+  }
+
+  // バリデーション
+  if (!recordSelectedSubject) {
+    if (errEl) {
+      errEl.textContent = '教科を選択してください';
+      errEl.classList.remove('hidden');
+    }
+    return;
+  }
+  const memoEl = document.getElementById('record-memo');
+  const memo = memoEl ? memoEl.value.trim() : '';
+  if (!memo) {
+    if (errEl) {
+      errEl.textContent = '勉強内容を入力してください';
+      errEl.classList.remove('hidden');
+    }
+    return;
+  }
+
+  setButtonDisabled('record-save-btn', true);
+
+  try {
+    const res = await fetch('/api/timer/record', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        session_id: recordSessionId,
+        subject: recordSelectedSubject,
+        memo: memo,
+      }),
+    });
+    const data = await res.json();
+
+    if (data.success) {
+      // ダイアログを閉じる
+      document.getElementById('record-dialog').classList.add('hidden');
+
+      // 結果カードを表示
+      const resultCard = document.getElementById('timer-result-card');
+      const resultTime = document.getElementById('timer-result-time');
+      if (resultTime && timerState) resultTime.textContent = formatSecondsJa(timerState.total_seconds);
+      if (resultCard) resultCard.classList.remove('hidden');
+
+      // 記録完了メッセージ
+      showTimerSuccess('記録しました！📝');
+
+    } else {
+      if (errEl) {
+        errEl.textContent = data.error || '保存に失敗しました';
+        errEl.classList.remove('hidden');
+      }
+      setButtonDisabled('record-save-btn', false);
+    }
+  } catch (err) {
+    if (errEl) {
+      errEl.textContent = '通信エラーが発生しました。もう一度お試しください';
+      errEl.classList.remove('hidden');
+    }
+    setButtonDisabled('record-save-btn', false);
+  }
+}
+
 // -----------------------------------------------
 // タイマーUI用ヘルパー
 // -----------------------------------------------
@@ -1351,10 +1570,22 @@ function showTimerError(msg) {
   el.textContent = msg;
   el.classList.remove('hidden');
 }
+function showTimerSuccess(msg) {
+  const el = document.getElementById('timer-success');
+  if (el) {
+    el.textContent = msg;
+    el.classList.remove('hidden');
+  }
+}
 function clearTimerError() {
-  const el = document.getElementById('timer-error');
-  el.classList.add('hidden');
-  el.textContent = '';
+  const errEl = document.getElementById('timer-error');
+  errEl.classList.add('hidden');
+  errEl.textContent = '';
+  const sucEl = document.getElementById('timer-success');
+  if (sucEl) {
+    sucEl.classList.add('hidden');
+    sucEl.textContent = '';
+  }
 }
 function setButtonDisabled(id, disabled) {
   const btn = document.getElementById(id);

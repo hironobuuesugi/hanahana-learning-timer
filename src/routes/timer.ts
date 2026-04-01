@@ -465,6 +465,72 @@ timer.post('/finish-frozen', async (c) => {
 });
 
 // =============================================
+// POST /api/timer/record - 教科・勉強内容を記録する
+//
+// フィニッシュ後（status = 'finished'）のセッションに
+// subject（教科）と memo（勉強内容）を保存する。
+//
+// body: { session_id: number, subject: string, memo: string }
+//
+// subject の有効値:
+//   'english' | 'math' | 'japanese' | 'science' | 'social' | 'other'
+// =============================================
+timer.post('/record', async (c) => {
+  const userId = c.get('userId');
+  const db = c.env.DB;
+
+  let body: { session_id?: unknown; subject?: unknown; memo?: unknown };
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ success: false, error: 'リクエストの形式が正しくありません' }, 400);
+  }
+
+  const { session_id, subject, memo } = body;
+
+  // バリデーション
+  if (!session_id || typeof session_id !== 'number') {
+    return c.json({ success: false, error: 'session_id が必要です' }, 400);
+  }
+  if (!subject || typeof subject !== 'string') {
+    return c.json({ success: false, error: '教科を選択してください' }, 400);
+  }
+  if (!memo || typeof memo !== 'string' || (memo as string).trim() === '') {
+    return c.json({ success: false, error: '勉強内容を入力してください' }, 400);
+  }
+
+  const validSubjects = ['english', 'math', 'japanese', 'science', 'social', 'other'];
+  if (!validSubjects.includes(subject as string)) {
+    return c.json({ success: false, error: '無効な教科です' }, 400);
+  }
+
+  // セッションが自分のもので、finished であることを確認
+  const session = await db.prepare(
+    `SELECT * FROM study_sessions WHERE id = ? AND user_id = ? AND status = 'finished'`
+  ).bind(session_id, userId).first<StudySessionRecord>();
+
+  if (!session) {
+    return c.json({ success: false, error: '記録対象のセッションが見つかりません' }, 404);
+  }
+
+  // 既に記録済みかチェック
+  if ((session as any).subject) {
+    return c.json({ success: false, error: 'すでに記録済みです' }, 409);
+  }
+
+  const now = new Date().toISOString();
+  await db.prepare(
+    `UPDATE study_sessions SET subject = ?, memo = ?, updated_at = ? WHERE id = ?`
+  ).bind(subject, (memo as string).trim(), now, session_id).run();
+
+  return c.json({
+    success: true,
+    message: '記録しました！',
+    data: { session_id, subject, memo: (memo as string).trim() },
+  });
+});
+
+// =============================================
 // POST /api/timer/finish-abandoned (後方互換)
 // 旧エンドポイント。finish-frozen に委譲。
 // =============================================
