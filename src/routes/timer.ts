@@ -611,6 +611,54 @@ timer.post('/finish-abandoned', async (c) => {
 });
 
 // =============================================
+// POST /api/timer/discard
+// 60秒未満セッションを完全に無効化（DB から削除）する。
+//
+// 集計・一覧どちらにも残らないよう DELETE で除去する。
+// 対象: ログインユーザー本人の finished セッションで
+//       total_seconds < 60 かつ subject が NULL（記録未入力）のもの。
+// =============================================
+timer.post('/discard', async (c) => {
+  const userId = c.get('userId');
+  const db     = c.env.DB;
+
+  // body から session_id を受け取る
+  let body: { session_id?: unknown };
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ success: false, error: 'リクエストの形式が正しくありません' }, 400);
+  }
+
+  const { session_id } = body;
+  if (!session_id || typeof session_id !== 'number') {
+    return c.json({ success: false, error: 'session_id が必要です' }, 400);
+  }
+
+  // 本人所有・finished・60秒未満・未記録 であることを確認
+  const session = await db.prepare(
+    `SELECT id, total_seconds FROM study_sessions
+     WHERE id = ? AND user_id = ? AND status = 'finished' AND subject IS NULL`
+  ).bind(session_id, userId).first<{ id: number; total_seconds: number }>();
+
+  if (!session) {
+    // 見つからない場合も成功扱い（冪等性: すでに削除済み or 対象外）
+    return c.json({ success: true, message: '対象セッションなし（処理不要）' });
+  }
+
+  if ((session.total_seconds ?? 0) >= 60) {
+    return c.json({ success: false, error: '60秒以上のセッションは破棄できません' }, 422);
+  }
+
+  // DELETE で完全除去（session_pauses は CASCADE で自動削除）
+  await db.prepare(
+    `DELETE FROM study_sessions WHERE id = ?`
+  ).bind(session_id).run();
+
+  return c.json({ success: true, message: '短時間セッションを破棄しました' });
+});
+
+// =============================================
 // 秒数を「XX時間YY分ZZ秒」に変換するヘルパー
 // =============================================
 function formatSeconds(sec: number): string {

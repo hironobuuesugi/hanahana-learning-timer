@@ -1322,6 +1322,35 @@ function resetTimerFull() {
 }
 
 // -----------------------------------------------
+// 60秒未満セッションをサーバーから完全废棄してホームに戻る
+//
+// フロー:
+//   1. /api/timer/discard で DB からセッションを削除（集計に入らない）
+//   2. 内部状態を完全リセット
+//   3. ホーム画面へ自動遷移＋集計表示更新
+// -----------------------------------------------
+async function discardShortSessionAndGoHome(sessionId) {
+  // DB から削除（失敗しても画面遷移は行う）
+  try {
+    await fetch('/api/timer/discard', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ session_id: sessionId }),
+    });
+  } catch (e) {
+    // 通信エラーは無視して遷移を続行
+  }
+
+  // 内部状態を完全リセット
+  resetTimerFull();
+
+  // ホーム画面へ移動＋集計更新
+  showPage('page-home');
+  fetchAndRenderStats();
+}
+
+// -----------------------------------------------
 // タイマーUIを状態に合わせて描画する
 // -----------------------------------------------
 function renderTimerUI() {
@@ -1551,10 +1580,14 @@ async function handleTimerFinish() {
       stopTimerTick();
       renderTimerUI();
 
-      // 60秒未満は記録ダイアログを出さずリセット＋メッセージのみ
+      // 60秒未満: DBから削除してホームへ戻る
       if (timerState.total_seconds < 60) {
-        resetTimerFull();
+        const shortId = timerState.session_id;
+        stopTimerTick();
+        renderTimerUI();
+        // 「記録されません」メッセージを一瞬表示してからホームへ
         showTimerSuccess('1分未満の勉強は記録されません');
+        setTimeout(() => discardShortSessionAndGoHome(shortId), 1500);
       } else {
         showRecordDialog(timerState.session_id, timerState.total_seconds);
       }
@@ -1711,10 +1744,14 @@ async function handleAbandonedFinish() {
       stopTimerTick();
       renderTimerUI();
 
-      // 60秒未満は記録ダイアログを出さずリセット＋メッセージのみ
+      // 60秒未満: DBから削除してホームへ戻る
       if (timerState.total_seconds < 60) {
-        resetTimerFull();
+        const shortId = timerState.session_id;
+        closeAbandonedDialog();
+        stopTimerTick();
+        renderTimerUI();
         showTimerSuccess('1分未満の勉強は記録されません');
+        setTimeout(() => discardShortSessionAndGoHome(shortId), 1500);
       } else {
         showRecordDialog(timerState.session_id, timerState.total_seconds);
       }
@@ -1846,20 +1883,12 @@ async function handleRecordSave() {
       // ダイアログを閉じる
       document.getElementById('record-dialog').classList.add('hidden');
 
-      // 勉強時間を先に保存（resetTimerFull で timerState が null になる前に取得）
-      const savedSeconds = timerState ? timerState.total_seconds : 0;
-
-      // タイマー状態を完全リセット（次のセッションが正常に開始できるようにする）
+      // タイマー状態を完全リセット
       resetTimerFull();
 
-      // 結果カードを表示（リセット後に改めて出す）
-      const resultCard = document.getElementById('timer-result-card');
-      const resultTime = document.getElementById('timer-result-time');
-      if (resultTime) resultTime.textContent = formatSecondsJa(savedSeconds);
-      if (resultCard) resultCard.classList.remove('hidden');
-
-      // 記録完了メッセージ
-      showTimerSuccess('記録しました！📝');
+      // ホーム画面へ自動遷移＋集計更新
+      showPage('page-home');
+      fetchAndRenderStats();
 
     } else {
       if (errEl) {
