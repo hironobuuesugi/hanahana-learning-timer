@@ -1122,39 +1122,114 @@ function formatDateJa(isoStr) {
   }) + '（' + DOW[d.getDay()] + '）';
 }
 
-// 記録1件分のHTMLを生成して返す（.tsx内でclass属性をJSX誤解釈されないよう文字列連結で構築）
-function buildRecordCard(rec) {
-  const dateStr    = formatDateJa(rec.started_at);
-  const timeStr    = formatSecondsJaShort(rec.total_seconds);
-  const subjectStr = formatSubjects(rec.subject);
-  const memoText   = rec.memo ? escapeHtml(rec.memo) : '-';
+// -----------------------------------------------
+// セッション配列を「日付キー (YYYY-MM-DD)」でグループ化して返す
+// 戻り値: [{ dateKey, dateStr, totalSeconds, subjects[], memos[] }, ...]
+//   - dateKey の降順（新しい日が先頭）で返す
+//   - subjects は重複排除済みの日本語名配列
+//   - memos は空文字・null を除いた文字列配列（順番通り）
+// -----------------------------------------------
+function groupRecordsByDate(records) {
+  // dateKey → グループオブジェクト のマップ
+  const map = {};
 
-  // 教科バッジ（複数）
-  const badgeHtml = subjectStr.split(' / ').map(s =>
-    '<span style="display:inline-block;font-size:0.75rem;font-weight:600;background:#fce7f3;color:#db2777;border-radius:9999px;padding:1px 8px;">'
-    + escapeHtml(s) + '</span>'
-  ).join(' ');
+  records.forEach(rec => {
+    // UTC日付を YYYY-MM-DD キーに変換
+    const dateKey = rec.started_at ? rec.started_at.slice(0, 10) : 'unknown';
+
+    if (!map[dateKey]) {
+      map[dateKey] = {
+        dateKey,
+        dateStr:      formatDateJa(rec.started_at),
+        totalSeconds: 0,
+        subjectSet:   new Set(),   // 重複排除用
+        memos:        [],
+      };
+    }
+
+    const g = map[dateKey];
+    g.totalSeconds += (rec.total_seconds || 0);
+
+    // 教科コードをセットに追加（重複排除）
+    if (rec.subject) {
+      rec.subject.split(',').forEach(code => {
+        const label = SUBJECT_LABELS[code.trim()] || code.trim();
+        g.subjectSet.add(label);
+      });
+    }
+
+    // 勉強内容を追加（空除外）
+    if (rec.memo && rec.memo.trim()) {
+      g.memos.push(rec.memo.trim());
+    }
+  });
+
+  // dateKey の降順（新しい日が上）に並べて返す
+  return Object.values(map)
+    .sort((a, b) => (a.dateKey > b.dateKey ? -1 : 1))
+    .map(g => ({
+      dateKey:      g.dateKey,
+      dateStr:      g.dateStr,
+      totalSeconds: g.totalSeconds,
+      subjects:     Array.from(g.subjectSet),
+      memos:        g.memos,
+    }));
+}
+
+// -----------------------------------------------
+// 1日分のグループカードHTML を生成して返す
+// （.tsx 内で class= が JSX 誤解釈されないよう文字列連結で構築）
+// -----------------------------------------------
+function buildDayCard(group) {
+  const timeStr = formatSecondsJaShort(group.totalSeconds);
+
+  // 教科バッジ
+  const badgeHtml = group.subjects.length > 0
+    ? group.subjects.map(s =>
+        '<span style="display:inline-block;font-size:0.75rem;font-weight:600;'
+        + 'background:#fce7f3;color:#db2777;border-radius:9999px;padding:1px 10px;">'
+        + escapeHtml(s) + '</span>'
+      ).join(' ')
+    : '<span style="font-size:0.75rem;color:#9ca3af;">-</span>';
+
+  // 勉強内容リスト（複数行を箇条書き風に）
+  let memosHtml;
+  if (group.memos.length === 0) {
+    memosHtml = '<span style="color:#9ca3af;">-</span>';
+  } else if (group.memos.length === 1) {
+    memosHtml = '<span style="font-size:0.875rem;color:#4b5563;">' + escapeHtml(group.memos[0]) + '</span>';
+  } else {
+    memosHtml = '<ul style="margin:0;padding-left:1.1rem;list-style:disc;">'
+      + group.memos.map(m =>
+          '<li style="font-size:0.875rem;color:#4b5563;line-height:1.7;">' + escapeHtml(m) + '</li>'
+        ).join('')
+      + '</ul>';
+  }
 
   return (
-    '<div style="background:#fff;border-radius:0.75rem;box-shadow:0 1px 4px rgba(0,0,0,0.08);padding:1rem;margin-bottom:0;">'
-    // 日付行
-    + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">'
+    '<div style="background:#fff;border-radius:0.75rem;box-shadow:0 1px 4px rgba(0,0,0,0.08);padding:1rem;">'
+
+    // ── 日付ヘッダー ──
+    + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">'
     +   '<i class="fas fa-calendar-alt" style="color:#f9a8d4;font-size:0.875rem;"></i>'
-    +   '<span style="font-size:0.875rem;font-weight:500;color:#4b5563;">' + escapeHtml(dateStr) + '</span>'
+    +   '<span style="font-size:0.875rem;font-weight:600;color:#374151;">' + escapeHtml(group.dateStr) + '</span>'
     + '</div>'
-    // 時間 + 教科バッジ行
-    + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">'
+
+    // ── 合計時間 + 教科バッジ ──
+    + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">'
     +   '<div style="display:flex;align-items:center;gap:6px;">'
     +     '<i class="fas fa-clock" style="color:#c4b5fd;font-size:0.875rem;"></i>'
-    +     '<span style="font-size:1rem;font-weight:700;color:#7c3aed;">' + escapeHtml(timeStr) + '</span>'
+    +     '<span style="font-size:1.05rem;font-weight:700;color:#7c3aed;">' + escapeHtml(timeStr) + '</span>'
     +   '</div>'
     +   '<div style="display:flex;flex-wrap:wrap;gap:4px;justify-content:flex-end;">' + badgeHtml + '</div>'
     + '</div>'
-    // 勉強内容行
-    + '<div style="display:flex;align-items:flex-start;gap:8px;margin-top:8px;padding-top:8px;border-top:1px solid #f9fafb;">'
-    +   '<i class="fas fa-pencil-alt" style="color:#d1d5db;font-size:0.875rem;margin-top:2px;flex-shrink:0;"></i>'
-    +   '<p style="font-size:0.875rem;color:#4b5563;line-height:1.6;margin:0;">' + memoText + '</p>'
+
+    // ── 勉強内容 ──
+    + '<div style="display:flex;align-items:flex-start;gap:8px;padding-top:10px;border-top:1px solid #f3f4f6;">'
+    +   '<i class="fas fa-pencil-alt" style="color:#d1d5db;font-size:0.875rem;margin-top:3px;flex-shrink:0;"></i>'
+    +   '<div style="flex:1;">' + memosHtml + '</div>'
     + '</div>'
+
     + '</div>'
   );
 }
@@ -1200,8 +1275,9 @@ async function initRecordsPage() {
       return;
     }
 
-    // 記録カードを順番に追加
-    listEl.innerHTML = records.map(buildRecordCard).join('');
+    // セッションを日付ごとにグループ化してカードを描画
+    const groups = groupRecordsByDate(records);
+    listEl.innerHTML = groups.map(buildDayCard).join('<div style="height:12px;"></div>');
 
   } catch (e) {
     loadingEl.classList.add('hidden');
