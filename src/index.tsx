@@ -9,6 +9,7 @@ import { serveStatic } from 'hono/cloudflare-workers'
 import authRoutes from './routes/auth'
 import timerRoutes from './routes/timer'
 import statsRoutes from './routes/stats'
+import recordsRoutes from './routes/records'
 import { authMiddleware } from './middleware/auth'
 import type { Bindings, Variables } from './types'
 
@@ -32,6 +33,7 @@ app.use('/static/*', serveStatic({ root: './public' }))
 app.route('/api/auth', authRoutes)
 app.route('/api/timer', timerRoutes)
 app.route('/api/stats', statsRoutes)
+app.route('/api/records', recordsRoutes)
 
 // =============================================
 // フロントエンドページ（SPA形式）
@@ -443,11 +445,14 @@ app.get('*', (c) => {
             <p class="text-xs text-pink-400 mt-1 font-medium">タップして開始→</p>
           </div>
 
-          <!-- 勉強記録（準備中） -->
-          <div class="card p-4 opacity-60 cursor-not-allowed">
+          <!-- 勉強記録（使用可能） -->
+          <div
+            class="card p-4 cursor-pointer hover:shadow-md transition-shadow border-2 border-purple-100 hover:border-purple-300"
+            onclick="showPage('page-records'); initRecordsPage()"
+          >
             <div class="text-3xl mb-2">📝</div>
             <p class="font-medium text-gray-700 text-sm">勉強記録</p>
-            <p class="text-xs text-gray-400 mt-1">準備中...</p>
+            <p class="text-xs text-purple-400 mt-1 font-medium">記録を見る→</p>
           </div>
 
           <!-- ランキング（準備中） -->
@@ -510,6 +515,55 @@ app.get('*', (c) => {
           ログアウト
         </button>
       </div>
+
+    </main>
+  </div>
+</div>
+
+<!-- =============================================
+     ページ5: 勉強記録一覧画面
+     ============================================= -->
+<div id="page-records" class="page">
+  <div class="min-h-screen">
+
+    <!-- ヘッダー -->
+    <header class="bg-white shadow-sm sticky top-0 z-10">
+      <div class="max-w-lg mx-auto px-4 py-3 flex items-center justify-between">
+        <button
+          onclick="showPage('page-home')"
+          class="text-gray-500 hover:text-gray-700 flex items-center gap-1 transition-colors"
+        >
+          <i class="fas fa-chevron-left"></i>
+          <span class="text-sm">ホーム</span>
+        </button>
+        <span class="font-bold text-transparent bg-clip-text bg-gradient-to-r from-pink-400 to-purple-400 text-sm">
+          📝 勉強記録
+        </span>
+        <div class="w-16"></div><!-- スペーサー -->
+      </div>
+    </header>
+
+    <!-- メインコンテンツ -->
+    <main class="max-w-lg mx-auto px-4 py-6">
+
+      <!-- ローディング中 -->
+      <div id="records-loading" class="text-center py-12 hidden">
+        <div class="inline-block w-8 h-8 border-4 border-pink-200 border-t-pink-400 rounded-full animate-spin mb-3"></div>
+        <p class="text-sm text-gray-400">読み込み中...</p>
+      </div>
+
+      <!-- エラーメッセージ -->
+      <div id="records-error" class="hidden bg-red-50 border border-red-200 rounded-lg p-3 mb-4 text-sm text-red-600"></div>
+
+      <!-- 記録なし -->
+      <div id="records-empty" class="hidden text-center py-16">
+        <div class="text-5xl mb-4">📚</div>
+        <p class="text-gray-500 text-sm">まだ勉強記録がありません</p>
+        <p class="text-gray-400 text-xs mt-2">タイマーで勉強を記録しよう！</p>
+      </div>
+
+      <!-- 記録一覧 -->
+      <div id="records-list" class="space-y-3"></div>
 
     </main>
   </div>
@@ -1031,6 +1085,129 @@ async function fetchAndRenderStats() {
   } catch (e) {
     // ネットワークエラーは集計欄を "--" のまま無視（既存機能に影響しない）
     console.warn('Stats fetch error:', e);
+  }
+}
+
+// =============================================
+// 勉強記録一覧ページ
+// =============================================
+
+// 教科コード → 日本語表示マップ
+const SUBJECT_LABELS = {
+  english: '英語',
+  math:    '数学',
+  japanese:'国語',
+  science: '理科',
+  social:  '社会',
+  other:   'その他',
+};
+
+// 教科コードカンマ区切り文字列 → 日本語スラッシュ区切り表示
+// 例: "english,math" → "英語 / 数学"
+function formatSubjects(subjectStr) {
+  if (!subjectStr) return '-';
+  return subjectStr
+    .split(',')
+    .map(s => SUBJECT_LABELS[s.trim()] || s.trim())
+    .join(' / ');
+}
+
+// 日付文字列 (ISO8601) → "YYYY年M月D日（曜日）" 形式
+function formatDateJa(isoStr) {
+  if (!isoStr) return '-';
+  const d   = new Date(isoStr);
+  const DOW = ['日', '月', '火', '水', '木', '金', '土'];
+  return d.toLocaleDateString('ja-JP', {
+    year: 'numeric', month: 'long', day: 'numeric',
+  }) + '（' + DOW[d.getDay()] + '）';
+}
+
+// 記録1件分のHTMLを生成して返す（.tsx内でclass属性をJSX誤解釈されないよう文字列連結で構築）
+function buildRecordCard(rec) {
+  const dateStr    = formatDateJa(rec.started_at);
+  const timeStr    = formatSecondsJaShort(rec.total_seconds);
+  const subjectStr = formatSubjects(rec.subject);
+  const memoText   = rec.memo ? escapeHtml(rec.memo) : '-';
+
+  // 教科バッジ（複数）
+  const badgeHtml = subjectStr.split(' / ').map(s =>
+    '<span style="display:inline-block;font-size:0.75rem;font-weight:600;background:#fce7f3;color:#db2777;border-radius:9999px;padding:1px 8px;">'
+    + escapeHtml(s) + '</span>'
+  ).join(' ');
+
+  return (
+    '<div style="background:#fff;border-radius:0.75rem;box-shadow:0 1px 4px rgba(0,0,0,0.08);padding:1rem;margin-bottom:0;">'
+    // 日付行
+    + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">'
+    +   '<i class="fas fa-calendar-alt" style="color:#f9a8d4;font-size:0.875rem;"></i>'
+    +   '<span style="font-size:0.875rem;font-weight:500;color:#4b5563;">' + escapeHtml(dateStr) + '</span>'
+    + '</div>'
+    // 時間 + 教科バッジ行
+    + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">'
+    +   '<div style="display:flex;align-items:center;gap:6px;">'
+    +     '<i class="fas fa-clock" style="color:#c4b5fd;font-size:0.875rem;"></i>'
+    +     '<span style="font-size:1rem;font-weight:700;color:#7c3aed;">' + escapeHtml(timeStr) + '</span>'
+    +   '</div>'
+    +   '<div style="display:flex;flex-wrap:wrap;gap:4px;justify-content:flex-end;">' + badgeHtml + '</div>'
+    + '</div>'
+    // 勉強内容行
+    + '<div style="display:flex;align-items:flex-start;gap:8px;margin-top:8px;padding-top:8px;border-top:1px solid #f9fafb;">'
+    +   '<i class="fas fa-pencil-alt" style="color:#d1d5db;font-size:0.875rem;margin-top:2px;flex-shrink:0;"></i>'
+    +   '<p style="font-size:0.875rem;color:#4b5563;line-height:1.6;margin:0;">' + memoText + '</p>'
+    + '</div>'
+    + '</div>'
+  );
+}
+
+// HTML特殊文字エスケープ（XSS防止）
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+// 勉強記録ページの初期化（ホーム画面から遷移してきた時）
+async function initRecordsPage() {
+  const loadingEl = document.getElementById('records-loading');
+  const errorEl   = document.getElementById('records-error');
+  const emptyEl   = document.getElementById('records-empty');
+  const listEl    = document.getElementById('records-list');
+
+  // 初期化
+  loadingEl.classList.remove('hidden');
+  errorEl.classList.add('hidden');
+  emptyEl.classList.add('hidden');
+  listEl.innerHTML = '';
+
+  try {
+    const res  = await fetch('/api/records');
+    const json = await res.json();
+
+    loadingEl.classList.add('hidden');
+
+    if (!json.success) {
+      errorEl.textContent = json.error || '記録の取得に失敗しました';
+      errorEl.classList.remove('hidden');
+      return;
+    }
+
+    const records = json.data;
+    if (!records || records.length === 0) {
+      emptyEl.classList.remove('hidden');
+      return;
+    }
+
+    // 記録カードを順番に追加
+    listEl.innerHTML = records.map(buildRecordCard).join('');
+
+  } catch (e) {
+    loadingEl.classList.add('hidden');
+    errorEl.textContent = '通信エラーが発生しました。再度お試しください。';
+    errorEl.classList.remove('hidden');
+    console.error('Records fetch error:', e);
   }
 }
 
