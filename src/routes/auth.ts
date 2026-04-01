@@ -13,13 +13,24 @@ import type { Bindings, Variables, UserRecord } from '../types'
 
 const auth = new Hono<{ Bindings: Bindings; Variables: Variables }>()
 
+// 登録用パスワード（管理者が設定）
+// 本番運用時は環境変数（c.env.REGISTRATION_PASSWORD）に移行することを推奨
+const REGISTRATION_PASSWORD = 'hanahana2026';
+
 // =============================================
 // POST /api/auth/register - 新規登録
 // =============================================
 auth.post('/register', async (c) => {
   try {
     const body = await c.req.json();
-    const { user_id, password, display_name } = body;
+    const { user_id, password, display_name, registration_password } = body;
+
+    // ─────────────────────────────────────────
+    // 登録用パスワードチェック（最初に検証）
+    // ─────────────────────────────────────────
+    if (!registration_password || registration_password !== REGISTRATION_PASSWORD) {
+      return c.json({ success: false, error: '登録用パスワードが正しくありません' }, 403);
+    }
 
     // バリデーション
     const userIdValidation = validateUserId(user_id);

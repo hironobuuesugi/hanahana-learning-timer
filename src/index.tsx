@@ -279,7 +279,7 @@ app.get('*', (c) => {
         </div>
 
         <!-- 表示名 -->
-        <div class="mb-6">
+        <div class="mb-4">
           <label class="block text-sm font-medium text-gray-700 mb-1">
             <i class="fas fa-smile text-pink-400 mr-1"></i>表示名（ニックネーム）
             <span class="text-red-400">*</span>
@@ -291,7 +291,34 @@ app.get('*', (c) => {
             autocomplete="nickname"
             class="input-field w-full border border-gray-200 rounded-lg px-4 py-3 text-gray-800 placeholder-gray-400"
           />
-          <p class="text-xs text-gray-400 mt-1">20文字以内（絵文字もOK！）</p>
+          <p class="text-xs text-gray-400 mt-1">20文字以内（絵文字もOK！）— 登録後に変更はできません</p>
+        </div>
+
+        <!-- 登録用パスワード -->
+        <div class="mb-6">
+          <label class="block text-sm font-medium text-gray-700 mb-1">
+            <i class="fas fa-key text-pink-400 mr-1"></i>登録用パスワード
+            <span class="text-red-400">*</span>
+          </label>
+          <div class="relative">
+            <input
+              id="reg-regpassword"
+              type="password"
+              placeholder="登録用パスワードを入力"
+              autocomplete="off"
+              class="input-field w-full border border-gray-200 rounded-lg px-4 py-3 text-gray-800 placeholder-gray-400 pr-12"
+            />
+            <button
+              type="button"
+              onclick="togglePassword('reg-regpassword', 'reg-regpw-icon')"
+              class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+            >
+              <i id="reg-regpw-icon" class="fas fa-eye-slash text-sm"></i>
+            </button>
+          </div>
+          <p class="text-xs text-gray-400 mt-1">
+            <i class="fas fa-info-circle mr-1"></i>このアプリの登録には管理者から伝えられた登録用パスワードが必要です
+          </p>
         </div>
 
         <button
@@ -569,10 +596,11 @@ async function handleRegister() {
   const userId = document.getElementById('reg-userid').value.trim();
   const password = document.getElementById('reg-password').value;
   const displayName = document.getElementById('reg-displayname').value.trim();
+  const registrationPassword = document.getElementById('reg-regpassword').value;
 
   clearMessages();
 
-  if (!userId || !password || !displayName) {
+  if (!userId || !password || !displayName || !registrationPassword) {
     showError('register-error', 'すべての項目を入力してください');
     return;
   }
@@ -584,7 +612,12 @@ async function handleRegister() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ user_id: userId, password: password, display_name: displayName })
+      body: JSON.stringify({
+        user_id: userId,
+        password: password,
+        display_name: displayName,
+        registration_password: registrationPassword,
+      })
     });
 
     const data = await res.json();
@@ -597,6 +630,7 @@ async function handleRegister() {
       document.getElementById('reg-userid').value = '';
       document.getElementById('reg-password').value = '';
       document.getElementById('reg-displayname').value = '';
+      document.getElementById('reg-regpassword').value = '';
     } else {
       showError('register-error', data.error || '登録に失敗しました');
     }
