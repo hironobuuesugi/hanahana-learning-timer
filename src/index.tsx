@@ -437,8 +437,10 @@ app.get('*', (c) => {
         </h3>
         <!-- 保存済みテスト日の表示 -->
         <div id="testdate-display" class="mb-3 hidden">
-          <p class="text-sm text-gray-500 mb-1">登録中のテスト日</p>
-          <p class="text-lg font-bold text-orange-500" id="testdate-value">--</p>
+          <div class="flex items-center gap-3">
+            <p class="text-2xl font-bold text-orange-500" id="testdate-value">--</p>
+            <p class="text-sm font-medium text-orange-400 bg-orange-50 px-2 py-1 rounded-lg" id="testdate-countdown"></p>
+          </div>
         </div>
         <!-- 入力フォーム -->
         <div class="flex gap-2 items-center">
@@ -1126,21 +1128,52 @@ async function fetchAndRenderStats() {
 // テスト日機能 - 取得・保存
 // =============================================
 
+// YYYY-MM-DD を「M/D」形式に変換するユーティリティ
+function formatTestDateShort(dateStr) {
+  var parts = dateStr.split('-');
+  if (parts.length !== 3) return dateStr;
+  return parseInt(parts[1], 10) + '/' + parseInt(parts[2], 10);
+}
+
+// 今日からテスト日までの日数差を計算（テスト日 - 今日）
+function calcDaysUntilTest(dateStr) {
+  // 日付のみで比較するため時刻をゼロにする
+  var today = new Date();
+  var todayMidnight = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  var parts = dateStr.split('-');
+  var testMidnight  = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+  var diffMs   = testMidnight.getTime() - todayMidnight.getTime();
+  var diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
+  return diffDays;
+}
+
+// 日数差を「あと◯日」テキストに変換
+function formatCountdown(days) {
+  if (days < 0)  return '終了';
+  return 'あと' + days + '日';
+}
+
+// テスト日の表示エリアを更新する共通関数
+function renderTestDateDisplay(dateVal) {
+  var displayEl    = document.getElementById('testdate-display');
+  var valueEl      = document.getElementById('testdate-value');
+  var countdownEl  = document.getElementById('testdate-countdown');
+  if (dateVal && displayEl && valueEl && countdownEl) {
+    valueEl.textContent     = formatTestDateShort(dateVal);
+    countdownEl.textContent = formatCountdown(calcDaysUntilTest(dateVal));
+    displayEl.classList.remove('hidden');
+  } else if (displayEl) {
+    displayEl.classList.add('hidden');
+  }
+}
+
 // テスト日をAPIから取得してホーム画面に表示する
 async function fetchTestDate() {
   try {
     var res  = await fetch('/api/testdate');
     var json = await res.json();
     if (!json.success) return;
-    var dateVal = json.test_date;
-    var displayEl = document.getElementById('testdate-display');
-    var valueEl   = document.getElementById('testdate-value');
-    if (dateVal && displayEl && valueEl) {
-      valueEl.textContent = dateVal;
-      displayEl.classList.remove('hidden');
-    } else if (displayEl) {
-      displayEl.classList.add('hidden');
-    }
+    renderTestDateDisplay(json.test_date);
   } catch (e) {
     console.warn('TestDate fetch error:', e);
   }
@@ -1178,10 +1211,7 @@ async function saveTestDate() {
 
     if (json.success) {
       // 表示を更新
-      var displayEl = document.getElementById('testdate-display');
-      var valueEl   = document.getElementById('testdate-value');
-      if (valueEl)   valueEl.textContent = json.test_date;
-      if (displayEl) displayEl.classList.remove('hidden');
+      renderTestDateDisplay(json.test_date);
 
       // 成功メッセージを3秒表示
       if (msgEl) {
