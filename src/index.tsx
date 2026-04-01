@@ -156,6 +156,7 @@ app.get('*', (c) => {
       <div class="card p-6">
         <div id="login-error" class="hidden error-msg bg-red-50 border border-red-200 text-red-600 text-sm rounded-lg p-3 mb-4"></div>
 
+        <form onsubmit="handleLogin(); return false;">
         <div class="mb-4">
           <label class="block text-sm font-medium text-gray-700 mb-1">
             <i class="fas fa-user text-pink-400 mr-1"></i>ユーザーID
@@ -193,11 +194,12 @@ app.get('*', (c) => {
 
         <button
           id="login-btn"
-          onclick="handleLogin()"
+          type="submit"
           class="btn-primary w-full text-white font-bold py-3 rounded-lg"
         >
           <i class="fas fa-sign-in-alt mr-2"></i>ログイン
         </button>
+        </form>
 
         <div class="mt-4 text-center">
           <p class="text-sm text-gray-500">
@@ -234,6 +236,7 @@ app.get('*', (c) => {
         <div id="register-error" class="hidden error-msg bg-red-50 border border-red-200 text-red-600 text-sm rounded-lg p-3 mb-4"></div>
         <div id="register-success" class="hidden bg-green-50 border border-green-200 text-green-600 text-sm rounded-lg p-3 mb-4"></div>
 
+        <form onsubmit="handleRegister(); return false;">
         <!-- ユーザーID -->
         <div class="mb-4">
           <label class="block text-sm font-medium text-gray-700 mb-1">
@@ -293,11 +296,12 @@ app.get('*', (c) => {
 
         <button
           id="register-btn"
-          onclick="handleRegister()"
+          type="submit"
           class="btn-primary w-full text-white font-bold py-3 rounded-lg"
         >
           <i class="fas fa-user-plus mr-2"></i>アカウントを作成する
         </button>
+        </form>
 
         <div class="mt-4 text-center">
           <p class="text-sm text-gray-500">
@@ -644,18 +648,7 @@ function updateHomeScreen(user) {
   document.getElementById('home-avatar').textContent = firstChar;
 }
 
-// =============================================
-// エンター/リターンキーでフォーム送信
-// =============================================
-document.getElementById('login-password').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') handleLogin();
-});
-document.getElementById('login-userid').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') handleLogin();
-});
-document.getElementById('reg-displayname').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') handleRegister();
-});
+// フォームタグのonsubmitでEnterキー送信をハンドリング済み
 
 // =============================================
 // 初期化: 既存セッションの確認
