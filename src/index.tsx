@@ -681,7 +681,7 @@ app.get('*', (c) => {
           <button type="button" data-subject="math"
             onclick="selectSubject('math')"
             class="subject-btn py-3 rounded-xl text-sm font-medium border-2 border-gray-200 text-gray-600 hover:border-pink-300 hover:text-pink-600 transition-all">
-            数学・算数
+            数学
           </button>
           <button type="button" data-subject="english"
             onclick="selectSubject('english')"
