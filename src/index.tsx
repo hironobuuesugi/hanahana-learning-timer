@@ -8,6 +8,7 @@ import { logger } from 'hono/logger'
 import { serveStatic } from 'hono/cloudflare-workers'
 import authRoutes from './routes/auth'
 import timerRoutes from './routes/timer'
+import statsRoutes from './routes/stats'
 import { authMiddleware } from './middleware/auth'
 import type { Bindings, Variables } from './types'
 
@@ -30,6 +31,7 @@ app.use('/static/*', serveStatic({ root: './public' }))
 // =============================================
 app.route('/api/auth', authRoutes)
 app.route('/api/timer', timerRoutes)
+app.route('/api/stats', statsRoutes)
 
 // =============================================
 // フロントエンドページ（SPA形式）
@@ -389,6 +391,36 @@ app.get('*', (c) => {
               <i class="fas fa-user text-pink-300 mr-1"></i>
               <span id="home-userid"></span>
             </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- 勉強時間集計カード -->
+      <div class="card p-4 mb-6">
+        <h3 class="text-sm font-medium text-gray-500 mb-3 flex items-center gap-2">
+          <i class="fas fa-chart-bar text-pink-400"></i>
+          勉強時間
+        </h3>
+        <div class="grid grid-cols-2 gap-3" id="home-stats-grid">
+          <!-- 今日 -->
+          <div class="bg-pink-50 rounded-xl p-3 text-center">
+            <p class="text-xs text-pink-400 font-medium mb-1">今日</p>
+            <p class="text-lg font-bold text-pink-600" id="home-stats-today">--</p>
+          </div>
+          <!-- 今週 -->
+          <div class="bg-purple-50 rounded-xl p-3 text-center">
+            <p class="text-xs text-purple-400 font-medium mb-1">今週</p>
+            <p class="text-lg font-bold text-purple-600" id="home-stats-week">--</p>
+          </div>
+          <!-- 今月 -->
+          <div class="bg-blue-50 rounded-xl p-3 text-center">
+            <p class="text-xs text-blue-400 font-medium mb-1">今月</p>
+            <p class="text-lg font-bold text-blue-600" id="home-stats-month">--</p>
+          </div>
+          <!-- 累計 -->
+          <div class="bg-green-50 rounded-xl p-3 text-center">
+            <p class="text-xs text-green-500 font-medium mb-1">累計</p>
+            <p class="text-lg font-bold text-green-600" id="home-stats-total">--</p>
           </div>
         </div>
       </div>
@@ -949,9 +981,58 @@ function updateHomeScreen(user) {
   // アバター（表示名の最初の文字）
   const firstChar = user.display_name.charAt(0);
   document.getElementById('home-avatar').textContent = firstChar;
+
+  // 勉強時間集計を非同期で取得して表示（既存機能に影響しない）
+  fetchAndRenderStats();
 }
 
 // フォームタグのonsubmitでEnterキー送信をハンドリング済み
+
+// =============================================
+// 勉強時間集計 - フォーマットユーティリティ
+// =============================================
+
+// 秒数を中学生向けの日本語表記に変換
+// 例: 0 → "0分", 45 → "45分", 90 → "1時間30分"
+function formatSecondsJaShort(totalSeconds) {
+  const sec = Math.floor(totalSeconds);
+  if (sec <= 0) return '0分';
+  const hours   = Math.floor(sec / 3600);
+  const minutes = Math.floor((sec % 3600) / 60);
+  if (hours === 0) {
+    return minutes + '分';
+  } else if (minutes === 0) {
+    return hours + '時間';
+  } else {
+    return hours + '時間' + minutes + '分';
+  }
+}
+
+// =============================================
+// 勉強時間集計 - ホーム画面取得・表示
+// =============================================
+
+async function fetchAndRenderStats() {
+  try {
+    const res  = await fetch('/api/stats');
+    const json = await res.json();
+    if (!json.success) return;
+
+    const d = json.data;
+    const todayEl  = document.getElementById('home-stats-today');
+    const weekEl   = document.getElementById('home-stats-week');
+    const monthEl  = document.getElementById('home-stats-month');
+    const totalEl  = document.getElementById('home-stats-total');
+
+    if (todayEl)  todayEl.textContent  = formatSecondsJaShort(d.today_seconds);
+    if (weekEl)   weekEl.textContent   = formatSecondsJaShort(d.week_seconds);
+    if (monthEl)  monthEl.textContent  = formatSecondsJaShort(d.month_seconds);
+    if (totalEl)  totalEl.textContent  = formatSecondsJaShort(d.total_seconds);
+  } catch (e) {
+    // ネットワークエラーは集計欄を "--" のまま無視（既存機能に影響しない）
+    console.warn('Stats fetch error:', e);
+  }
+}
 
 // =============================================
 // タイマー機能
