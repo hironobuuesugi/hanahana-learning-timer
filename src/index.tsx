@@ -865,10 +865,9 @@ function updateHomeScreen(user) {
 // タイマー機能
 // =============================================
 
-// タイマーの内部状態
-// サーバーから取得した時刻データをもとに経過時間を計算する
-let timerState = null;   // APIから取得したTimerStateResponse
-let timerIntervalId = null; // setIntervalのID
+// タイマーの内部状態（サーバーから取得した状態を保持）
+let timerState = null;      // APIから取得した TimerStateResponse
+let timerIntervalId = null; // setInterval の ID
 
 // -----------------------------------------------
 // タイマーページ初期化（ホームから遷移してきた時）
@@ -877,8 +876,7 @@ async function initTimerPage() {
   clearTimerError();
   stopTimerTick();
 
-  // まず画面を必ずリセット状態にする
-  // （前回のフィニッシュ後の数字が残らないようにする）
+  // 画面を必ずリセット状態にする（前回の数字が残らないように）
   resetTimerDisplay();
 
   // サーバーから現在のセッション状態を取得
@@ -886,18 +884,43 @@ async function initTimerPage() {
   try {
     const res = await fetch('/api/timer/current', { credentials: 'include' });
     const data = await res.json();
-    if (data.success) {
-      serverState = data.data;
-    }
+    if (data.success) serverState = data.data;
   } catch (err) {
     serverState = null;
   }
 
-  if (serverState && (serverState.status === 'running' || serverState.status === 'paused')) {
-    // ─── 未終了セッションがある → 確認ダイアログを表示 ───
+  if (serverState && serverState.status === 'frozen') {
+    // ─── 凍結状態（確認待ち）→ 確認ダイアログを表示 ───
+    // タイマーは動かさない（startTimerTick を呼ばない）
+    timerState = serverState;
     showAbandonedDialog(serverState);
+
+  } else if (serverState && (serverState.status === 'running' || serverState.status === 'paused')) {
+    // ─── running/paused のまま残っている（古い状態）→ まず凍結してからダイアログ ───
+    // ブラウザ再起動等でfreezeが呼ばれなかったケースの救済
+    try {
+      const freezeRes = await fetch('/api/timer/freeze', {
+        method: 'POST',
+        credentials: 'include',
+      });
+      const freezeData = await freezeRes.json();
+      if (freezeData.success && freezeData.data) {
+        timerState = freezeData.data;
+        showAbandonedDialog(freezeData.data);
+      } else {
+        // 凍結失敗時はそのまま表示
+        timerState = serverState;
+        renderTimerUI();
+        startTimerTick();
+      }
+    } catch (err) {
+      timerState = serverState;
+      renderTimerUI();
+      startTimerTick();
+    }
+
   } else {
-    // ─── 未終了セッションなし → 通常のタイマー初期状態 ───
+    // ─── セッションなし / 終了済み → 通常の待機状態 ───
     timerState = null;
     renderTimerUI();
     startTimerTick();
@@ -906,7 +929,6 @@ async function initTimerPage() {
 
 // -----------------------------------------------
 // タイマー表示を 00:00:00 にリセットする
-// （フィニッシュ後に再度開いたとき前回の数字が残らないように）
 // -----------------------------------------------
 function resetTimerDisplay() {
   const display = document.getElementById('timer-display');
@@ -921,7 +943,7 @@ function resetTimerDisplay() {
 function renderTimerUI() {
   const status = timerState ? timerState.status : 'idle';
 
-  // 結果カードを隠す（finishedでなければ）
+  // 結果カードを隠す（finished でなければ）
   const resultCard = document.getElementById('timer-result-card');
   if (status !== 'finished') {
     resultCard.classList.add('hidden');
@@ -934,30 +956,37 @@ function renderTimerUI() {
   const subText  = document.getElementById('timer-sub-text');
 
   const statusMap = {
-    idle:     { label: '待機中',     dotColor: 'bg-gray-400',    badgeColor: 'bg-gray-100 text-gray-500' },
-    running:  { label: '勉強中',     dotColor: 'bg-green-400 animate-pulse', badgeColor: 'bg-green-100 text-green-600' },
-    paused:   { label: '一時停止中', dotColor: 'bg-amber-400',   badgeColor: 'bg-amber-100 text-amber-600' },
-    finished: { label: '終了',       dotColor: 'bg-purple-400',  badgeColor: 'bg-purple-100 text-purple-600' },
+    idle:     { label: '待機中',       dotColor: 'bg-gray-400',               badgeColor: 'bg-gray-100 text-gray-500' },
+    running:  { label: '勉強中',       dotColor: 'bg-green-400 animate-pulse', badgeColor: 'bg-green-100 text-green-600' },
+    paused:   { label: '一時停止中',   dotColor: 'bg-amber-400',              badgeColor: 'bg-amber-100 text-amber-600' },
+    frozen:   { label: '確認待ち',     dotColor: 'bg-orange-400',             badgeColor: 'bg-orange-100 text-orange-600' },
+    finished: { label: '終了',         dotColor: 'bg-purple-400',             badgeColor: 'bg-purple-100 text-purple-600' },
   };
   const s = statusMap[status] || statusMap.idle;
-  dot.className = 'w-2 h-2 rounded-full inline-block ' + s.dotColor;
+  dot.className      = 'w-2 h-2 rounded-full inline-block ' + s.dotColor;
   statusTx.textContent = s.label;
-  badge.className = 'inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium ' + s.badgeColor;
+  badge.className    = 'inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium ' + s.badgeColor;
 
   // サブテキスト
   const subMap = {
     idle:     'スタートを押して勉強を始めよう！',
     running:  '集中して頑張ろう！💪',
     paused:   '一時停止中... 再開できるよ',
+    frozen:   '確認が必要です',
     finished: 'お疲れ様でした！🌸',
   };
   subText.textContent = subMap[status] || '';
 
-  // ボタン表示制御
-  document.getElementById('btn-start').classList.toggle('hidden',  status !== 'idle');
-  document.getElementById('btn-pause').classList.toggle('hidden',  status !== 'running');
-  document.getElementById('btn-resume').classList.toggle('hidden', status !== 'paused');
-  document.getElementById('btn-finish').classList.toggle('hidden', status === 'idle' || status === 'finished');
+  // ボタン表示制御（frozen は idle 扱いで全ボタン隠す）
+  const showStart  = (status === 'idle');
+  const showPause  = (status === 'running');
+  const showResume = (status === 'paused');
+  const showFinish = (status === 'running' || status === 'paused');
+
+  document.getElementById('btn-start').classList.toggle('hidden',  !showStart);
+  document.getElementById('btn-pause').classList.toggle('hidden',  !showPause);
+  document.getElementById('btn-resume').classList.toggle('hidden', !showResume);
+  document.getElementById('btn-finish').classList.toggle('hidden', !showFinish);
 }
 
 // -----------------------------------------------
@@ -966,13 +995,13 @@ function renderTimerUI() {
 function startTimerTick() {
   stopTimerTick(); // 二重起動防止
   timerIntervalId = setInterval(() => {
-    const display = document.getElementById('timer-display');
-    if (!timerState || timerState.status === 'idle' || timerState.status === 'finished') {
-      // 待機中・終了後は表示をそのままにする
+    if (!timerState || timerState.status === 'idle' || timerState.status === 'finished' || timerState.status === 'frozen') {
+      // 待機中・終了後・凍結中はタイマーを進めない
       return;
     }
     const elapsed = calcElapsedSeconds(timerState);
-    display.textContent = formatSecondsDisplay(elapsed);
+    const display = document.getElementById('timer-display');
+    if (display) display.textContent = formatSecondsDisplay(elapsed);
   }, 1000);
 }
 
@@ -986,16 +1015,23 @@ function stopTimerTick() {
 // -----------------------------------------------
 // 経過秒数を計算する（フロント側）
 // started_at からの経過時間 - 一時停止時間の合計
+//
+// ※ frozen 状態では total_seconds が確定値として保存済みのため
+//    この関数は frozen では呼ばない（呼んでも 0 を返すように設計）
 // -----------------------------------------------
 function calcElapsedSeconds(state) {
   if (!state) return 0;
+  // frozen / finished は total_seconds をそのまま使う
+  if (state.status === 'frozen' || state.status === 'finished') {
+    return state.total_seconds || 0;
+  }
 
   const now   = Date.now();
   const start = new Date(state.started_at).getTime();
   let elapsed = Math.floor((now - start) / 1000);
 
   // 一時停止時間を差し引く
-  for (const pause of state.pauses) {
+  for (const pause of (state.pauses || [])) {
     const pauseMs  = new Date(pause.pause_at).getTime();
     const resumeMs = pause.resume_at ? new Date(pause.resume_at).getTime() : now;
     elapsed -= Math.floor((resumeMs - pauseMs) / 1000);
@@ -1047,7 +1083,6 @@ async function handleTimerStart() {
       renderTimerUI();
     } else {
       showTimerError(data.error || 'スタートに失敗しました');
-      // すでに進行中のセッションがある場合は状態を復元
       if (data.data) {
         timerState = data.data;
         renderTimerUI();
@@ -1086,7 +1121,7 @@ async function handleTimerPause() {
 }
 
 // -----------------------------------------------
-// 再開
+// 再開（一時停止 → 再開）
 // -----------------------------------------------
 async function handleTimerResume() {
   clearTimerError();
@@ -1127,13 +1162,13 @@ async function handleTimerFinish() {
 
       // 表示を確定した秒数に固定
       const display = document.getElementById('timer-display');
-      display.textContent = formatSecondsDisplay(timerState.total_seconds);
+      if (display) display.textContent = formatSecondsDisplay(timerState.total_seconds);
 
       // 結果カードを表示
       const resultCard = document.getElementById('timer-result-card');
       const resultTime = document.getElementById('timer-result-time');
-      resultTime.textContent = formatSecondsJa(timerState.total_seconds);
-      resultCard.classList.remove('hidden');
+      if (resultTime) resultTime.textContent = formatSecondsJa(timerState.total_seconds);
+      if (resultCard) resultCard.classList.remove('hidden');
 
       renderTimerUI();
       stopTimerTick();
@@ -1148,11 +1183,31 @@ async function handleTimerFinish() {
 }
 
 // -----------------------------------------------
-// ホームに戻る（タイマー動作中でも戻れるが状態は保持）
+// ホームに戻るボタン
+//
+// タイマーが running/paused の場合は凍結してからホームへ。
+// frozen/finished/idle の場合はそのままホームへ。
 // -----------------------------------------------
-function handleTimerBack() {
+async function handleTimerBack() {
   stopTimerTick();
   closeAbandonedDialog();
+
+  // タイマーが動作中 (running / paused) なら凍結してからホームへ
+  if (timerState && (timerState.status === 'running' || timerState.status === 'paused')) {
+    try {
+      const res = await fetch('/api/timer/freeze', {
+        method: 'POST',
+        credentials: 'include',
+      });
+      const data = await res.json();
+      if (data.success && data.data) {
+        timerState = data.data; // frozen 状態に更新
+      }
+    } catch (err) {
+      // 通信エラーでも画面遷移は行う
+    }
+  }
+
   showPage('page-home');
 }
 
@@ -1162,6 +1217,7 @@ function handleTimerBack() {
 
 // -----------------------------------------------
 // ダイアログを表示し、セッション情報を埋め込む
+// state は frozen 状態のセッションデータ
 // -----------------------------------------------
 function showAbandonedDialog(state) {
   // 開始時刻を日本語表記に変換
@@ -1173,17 +1229,23 @@ function showAbandonedDialog(state) {
   document.getElementById('abandoned-started-at').textContent = startedStr;
 
   // 状態の日本語表記
-  const statusLabel = state.status === 'running' ? '勉強中のまま離脱' : '一時停止中のまま離脱';
+  const statusLabel = '凍結状態（確認待ち）';
   document.getElementById('abandoned-status').textContent = statusLabel;
 
-  // それまでの経過勉強時間を計算して表示
-  // ただし「勉強中のまま離脱」の場合は started_at〜現在ではなく
-  // started_at〜最後に確認できる時点（= 現在）で計算する
-  // ユーザーに「これだけ勉強していたことになります」と示す
-  const elapsedSec = calcElapsedSeconds(state);
-  document.getElementById('abandoned-elapsed').textContent = formatSecondsJa(elapsedSec);
+  // 凍結時点で確定済みの total_seconds を表示
+  // ※ 凍結後は時間が加算されないので total_seconds が正確な累計値
+  const savedSec = state.total_seconds || 0;
+  document.getElementById('abandoned-elapsed').textContent = formatSecondsJa(savedSec);
 
-  // ダイアログを表示（タイマー画面の後ろに設定）
+  // タイマー表示も凍結時点の値に固定
+  const display = document.getElementById('timer-display');
+  if (display) display.textContent = formatSecondsDisplay(savedSec);
+
+  // ボタンを必ず有効化してからダイアログを表示
+  setButtonDisabled('abandoned-btn-resume', false);
+  setButtonDisabled('abandoned-btn-finish', false);
+
+  // ダイアログを表示
   document.getElementById('abandoned-dialog').classList.remove('hidden');
 }
 
@@ -1196,28 +1258,38 @@ function closeAbandonedDialog() {
 
 // -----------------------------------------------
 // 「再開する」ボタン
+//
+// /api/timer/resume-frozen を呼び、
+// バックエンドが「adjusted_start = now - saved_seconds 秒前」に
+// started_at を書き換えた running セッションを返す。
+// フロントは通常の running 状態として扱うだけでよい。
 // -----------------------------------------------
 async function handleAbandonedResume() {
+  // ボタンを無効化（二重送信防止）
   setButtonDisabled('abandoned-btn-resume', true);
   setButtonDisabled('abandoned-btn-finish', true);
+
   try {
-    // 再度 current を取得して timerState にセット
-    const res = await fetch('/api/timer/current', { credentials: 'include' });
+    const res = await fetch('/api/timer/resume-frozen', {
+      method: 'POST',
+      credentials: 'include',
+    });
     const data = await res.json();
+
     if (data.success && data.data) {
-      timerState = data.data;
+      timerState = data.data; // running 状態のセッション
       closeAbandonedDialog();
       renderTimerUI();
-      startTimerTick();
+      startTimerTick(); // ここで初めてタイマーを再開
+
     } else {
-      // セッションが見つからない場合は初期状態に
-      timerState = null;
-      closeAbandonedDialog();
-      renderTimerUI();
-      startTimerTick();
+      // エラー時はボタンを再度有効化
+      showTimerError(data.error || '再開に失敗しました。もう一度お試しください');
+      setButtonDisabled('abandoned-btn-resume', false);
+      setButtonDisabled('abandoned-btn-finish', false);
     }
   } catch (err) {
-    showTimerError('通信エラーが発生しました');
+    showTimerError('通信エラーが発生しました。もう一度お試しください');
     setButtonDisabled('abandoned-btn-resume', false);
     setButtonDisabled('abandoned-btn-finish', false);
   }
@@ -1225,39 +1297,47 @@ async function handleAbandonedResume() {
 
 // -----------------------------------------------
 // 「ここで終了する」ボタン
+//
+// /api/timer/finish-frozen を呼ぶ。
+// 凍結時点で確定済みの total_seconds がそのまま終了秒数になる。
+// 確認ダイアログが表示されていた時間は一切加算されない。
 // -----------------------------------------------
 async function handleAbandonedFinish() {
+  // ボタンを無効化（二重送信防止）
   setButtonDisabled('abandoned-btn-resume', true);
   setButtonDisabled('abandoned-btn-finish', true);
+
   try {
-    const res = await fetch('/api/timer/finish-abandoned', {
+    const res = await fetch('/api/timer/finish-frozen', {
       method: 'POST',
       credentials: 'include',
     });
     const data = await res.json();
-    if (data.success) {
+
+    if (data.success && data.data) {
       timerState = data.data;
       closeAbandonedDialog();
 
-      // 確定した秒数を表示
+      // 確定した秒数を表示（凍結時の total_seconds）
       const display = document.getElementById('timer-display');
-      display.textContent = formatSecondsDisplay(timerState.total_seconds);
+      if (display) display.textContent = formatSecondsDisplay(timerState.total_seconds);
 
       // 結果カードを表示
       const resultCard = document.getElementById('timer-result-card');
       const resultTime = document.getElementById('timer-result-time');
-      resultTime.textContent = formatSecondsJa(timerState.total_seconds);
-      resultCard.classList.remove('hidden');
+      if (resultTime) resultTime.textContent = formatSecondsJa(timerState.total_seconds);
+      if (resultCard) resultCard.classList.remove('hidden');
 
       renderTimerUI();
       stopTimerTick();
+
     } else {
-      showTimerError(data.error || '終了処理に失敗しました');
+      showTimerError(data.error || '終了処理に失敗しました。もう一度お試しください');
       setButtonDisabled('abandoned-btn-resume', false);
       setButtonDisabled('abandoned-btn-finish', false);
     }
   } catch (err) {
-    showTimerError('通信エラーが発生しました');
+    showTimerError('通信エラーが発生しました。もう一度お試しください');
     setButtonDisabled('abandoned-btn-resume', false);
     setButtonDisabled('abandoned-btn-finish', false);
   }

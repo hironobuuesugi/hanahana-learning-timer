@@ -1,11 +1,14 @@
 // =============================================
 // 花はな Learning Timer - タイマーAPIルート
 //
-// POST /api/timer/start    - タイマー開始
-// POST /api/timer/pause    - 一時停止
-// POST /api/timer/resume   - 再開
-// POST /api/timer/finish   - 終了・合計時間確定
-// GET  /api/timer/current  - 現在のセッション状態取得
+// POST /api/timer/start          - タイマー開始
+// POST /api/timer/pause          - 一時停止
+// POST /api/timer/resume         - 再開（一時停止→再開）
+// POST /api/timer/finish         - 終了・合計時間確定
+// POST /api/timer/freeze         - 凍結（ホーム戻り / ブラウザ離脱検知時）
+// POST /api/timer/resume-frozen  - 凍結状態から再開
+// POST /api/timer/finish-frozen  - 凍結状態からそのまま終了
+// GET  /api/timer/current        - 現在のセッション状態取得
 // =============================================
 
 import { Hono } from 'hono'
@@ -18,12 +21,13 @@ const timer = new Hono<{ Bindings: Bindings; Variables: Variables }>()
 timer.use('*', authMiddleware)
 
 // =============================================
-// 共通ヘルパー: アクティブセッション（running/paused）を取得
+// 共通ヘルパー: アクティブセッションを取得
+// 対象: running / paused / frozen
 // =============================================
 async function getActiveSession(db: D1Database, userId: number): Promise<StudySessionRecord | null> {
   return db.prepare(
     `SELECT * FROM study_sessions
-     WHERE user_id = ? AND status IN ('running', 'paused')
+     WHERE user_id = ? AND status IN ('running', 'paused', 'frozen')
      ORDER BY created_at DESC LIMIT 1`
   ).bind(userId).first<StudySessionRecord>();
 }
@@ -47,11 +51,12 @@ async function buildTimerState(db: D1Database, session: StudySessionRecord): Pro
     session_id: session.id,
     status: session.status,
     started_at: session.started_at,
-    finished_at: session.finished_at,
+    finished_at: session.finished_at ?? null,
+    frozen_at: (session as any).frozen_at ?? null,
     total_seconds: session.total_seconds,
     pauses: pauses.map(p => ({
       pause_at: p.pause_at,
-      resume_at: p.resume_at,
+      resume_at: p.resume_at ?? null,
     })),
   };
 }
@@ -63,13 +68,12 @@ async function buildTimerState(db: D1Database, session: StudySessionRecord): Pro
 function calcTotalSeconds(
   startedAt: string,
   finishedAt: string,
-  pauses: SessionPauseRecord[]
+  pauses: { pause_at: string; resume_at: string | null }[]
 ): number {
   const start = new Date(startedAt).getTime();
   const end   = new Date(finishedAt).getTime();
   const totalElapsed = Math.floor((end - start) / 1000);
 
-  // 一時停止していた合計秒数を算出
   let pausedSeconds = 0;
   for (const p of pauses) {
     if (p.resume_at) {
@@ -77,8 +81,7 @@ function calcTotalSeconds(
       const resumeMs = new Date(p.resume_at).getTime();
       pausedSeconds += Math.floor((resumeMs - pauseMs) / 1000);
     }
-    // resume_at が null（フィニッシュ直前まで一時停止中）の場合は
-    // finish 処理内で resume してから finish するので、ここでは無視
+    // resume_at が null のものは呼び出し元で閉じてから渡す
   }
 
   return Math.max(0, totalElapsed - pausedSeconds);
@@ -86,7 +89,6 @@ function calcTotalSeconds(
 
 // =============================================
 // GET /api/timer/current - 現在のセッション状態を取得
-// （ページ読み込み時・復元用）
 // =============================================
 timer.get('/current', async (c) => {
   const userId = c.get('userId');
@@ -95,7 +97,6 @@ timer.get('/current', async (c) => {
   const session = await getActiveSession(db, userId);
 
   if (!session) {
-    // アクティブなセッションなし → タイマーはリセット状態
     return c.json({ success: true, data: null });
   }
 
@@ -110,7 +111,6 @@ timer.post('/start', async (c) => {
   const userId = c.get('userId');
   const db = c.env.DB;
 
-  // すでにアクティブなセッションがある場合は拒否
   const existing = await getActiveSession(db, userId);
   if (existing) {
     const state = await buildTimerState(db, existing);
@@ -132,7 +132,6 @@ timer.post('/start', async (c) => {
     return c.json({ success: false, error: 'タイマーの開始に失敗しました' }, 500);
   }
 
-  // 作成したセッションを取得して返す
   const session = await db.prepare(
     'SELECT * FROM study_sessions WHERE id = ?'
   ).bind(result.meta.last_row_id).first<StudySessionRecord>();
@@ -163,12 +162,10 @@ timer.post('/pause', async (c) => {
 
   const now = new Date().toISOString();
 
-  // 一時停止ログを挿入
   await db.prepare(
     `INSERT INTO session_pauses (session_id, pause_at) VALUES (?, ?)`
   ).bind(session.id, now).run();
 
-  // セッション状態を更新
   await db.prepare(
     `UPDATE study_sessions SET status = 'paused', updated_at = ? WHERE id = ?`
   ).bind(now, session.id).run();
@@ -182,7 +179,7 @@ timer.post('/pause', async (c) => {
 });
 
 // =============================================
-// POST /api/timer/resume - 再開
+// POST /api/timer/resume - 再開（一時停止→再開）
 // =============================================
 timer.post('/resume', async (c) => {
   const userId = c.get('userId');
@@ -199,7 +196,6 @@ timer.post('/resume', async (c) => {
 
   const now = new Date().toISOString();
 
-  // 直近の一時停止ログに resume_at をセット
   await db.prepare(
     `UPDATE session_pauses
      SET resume_at = ?
@@ -207,7 +203,6 @@ timer.post('/resume', async (c) => {
      ORDER BY pause_at DESC LIMIT 1`
   ).bind(now, session.id).run();
 
-  // セッション状態を running に戻す
   await db.prepare(
     `UPDATE study_sessions SET status = 'running', updated_at = ? WHERE id = ?`
   ).bind(now, session.id).run();
@@ -233,6 +228,11 @@ timer.post('/finish', async (c) => {
     return c.json({ success: false, error: 'アクティブなセッションがありません' }, 404);
   }
 
+  // frozen状態でのfinishは finish-frozen を使うよう誘導
+  if (session.status === 'frozen') {
+    return c.json({ success: false, error: '確認待ちのセッションは /finish-frozen を使用してください' }, 409);
+  }
+
   const now = new Date().toISOString();
 
   // 一時停止中のままフィニッシュした場合は resume_at を now にセット
@@ -244,11 +244,9 @@ timer.post('/finish', async (c) => {
     ).bind(now, session.id).run();
   }
 
-  // 一時停止ログを取得して合計秒数を計算
   const pauses = await getPauses(db, session.id);
   const totalSeconds = calcTotalSeconds(session.started_at, now, pauses);
 
-  // セッションを finished に更新
   await db.prepare(
     `UPDATE study_sessions
      SET status = 'finished', finished_at = ?, total_seconds = ?, updated_at = ?
@@ -268,20 +266,169 @@ timer.post('/finish', async (c) => {
 });
 
 // =============================================
-// POST /api/timer/finish-abandoned
-// 「ここで終了する」用：放置セッションを現時刻で終了
+// POST /api/timer/freeze - セッションを凍結する
 //
-// 通常の /finish との違い:
-//   - /finish      → ユーザーが今まさに操作して終了
-//   - /finish-abandoned → 離脱したセッションを後から締める
-//     ブラウザを閉じた瞬間は記録できないため、
-//     「確認ダイアログで選択した時点」を終了時刻とする。
-//     ※ 要件「勝手に長時間加算しない」に対応:
-//       running 状態で長時間放置された場合、
-//       pause_at=started_at として一時停止扱いにし
-//       放置分の時間を加算しない。
+// 「ホームへ戻る」「ブラウザ離脱」時に呼ぶ。
+// 呼び出した瞬間までの累計勉強秒数を total_seconds に確定保存し、
+// status を 'frozen' に変更する。
+//
+// frozen 状態の特徴:
+//   - total_seconds が「確定済み」の累計秒数
+//   - 以降は時間が加算されない
+//   - 次回タイマー画面を開くと確認ダイアログが表示される
+//
+// paused 中に freeze した場合:
+//   - 一時停止ログを閉じ（resume_at = pause_at で差し引き0秒）
+//   - 一時停止直前までの勉強時間を total_seconds に保存
 // =============================================
-timer.post('/finish-abandoned', async (c) => {
+timer.post('/freeze', async (c) => {
+  const userId = c.get('userId');
+  const db = c.env.DB;
+
+  const session = await getActiveSession(db, userId);
+
+  if (!session) {
+    // すでに終了 or セッションなし → 正常扱い
+    return c.json({ success: true, message: 'セッションはありません', data: null });
+  }
+
+  // すでに frozen → 冪等に OK を返す
+  if (session.status === 'frozen') {
+    const state = await buildTimerState(db, session);
+    return c.json({ success: true, message: 'すでに凍結済みです', data: state });
+  }
+
+  const now = new Date().toISOString();
+  let totalSeconds = 0;
+
+  if (session.status === 'paused') {
+    // ─── 一時停止中に freeze ───
+    // pause_at 時点が実質的な「勉強の中断時点」。
+    // open な pause ログを取得し、resume_at = pause_at でクローズ
+    // （差し引き 0 秒になるため、一時停止中の時間は加算されない）
+    const allPauses = await getPauses(db, session.id);
+    const lastOpenPause = allPauses.filter(p => !p.resume_at).sort(
+      (a, b) => new Date(b.pause_at).getTime() - new Date(a.pause_at).getTime()
+    )[0];
+
+    const effectiveEnd = lastOpenPause ? lastOpenPause.pause_at : now;
+
+    // 閉じた状態で計算
+    const closedPauses = allPauses.map(p => ({
+      pause_at: p.pause_at,
+      resume_at: p.resume_at ?? effectiveEnd,
+    }));
+    totalSeconds = calcTotalSeconds(session.started_at, effectiveEnd, closedPauses);
+
+    // DB の一時停止ログを整合性のために更新
+    await db.prepare(
+      `UPDATE session_pauses SET resume_at = ? WHERE session_id = ? AND resume_at IS NULL`
+    ).bind(effectiveEnd, session.id).run();
+
+  } else {
+    // ─── running 中に freeze ───
+    // now 時点までの勉強時間を計算
+    const pauses = await getPauses(db, session.id);
+    totalSeconds = calcTotalSeconds(session.started_at, now, pauses);
+  }
+
+  // status を frozen に変更、確定した total_seconds を保存
+  await db.prepare(
+    `UPDATE study_sessions
+     SET status = 'frozen', frozen_at = ?, total_seconds = ?, updated_at = ?
+     WHERE id = ?`
+  ).bind(now, totalSeconds, now, session.id).run();
+
+  const updated = await db.prepare(
+    'SELECT * FROM study_sessions WHERE id = ?'
+  ).bind(session.id).first<StudySessionRecord>();
+
+  const state = await buildTimerState(db, updated!);
+  return c.json({
+    success: true,
+    message: `セッションを保存しました（${formatSeconds(totalSeconds)}）`,
+    data: state,
+  });
+});
+
+// =============================================
+// POST /api/timer/resume-frozen - 凍結状態から再開
+//
+// 「再開する」ボタンを押した時に呼ぶ。
+// 凍結時点の total_seconds を引き継ぎ、
+// frozen_at を新しい started_at として re-start する。
+//
+// 実装方式（シンプル版）:
+//   - 既存の frozen セッションを finished に変更
+//   - 新しい running セッションを total_seconds=0、
+//     started_at=now で作成
+//   - フロントエンドは resumed_seconds（= 引き継ぎ秒数）を加算して表示
+//
+// ただし、上記は複雑になるため、より明快な方式を採用:
+//   - frozen セッションの status を running に戻す
+//   - started_at を「now - total_seconds 秒前」に書き換える
+//   - pauses テーブルは空の状態にする（freeze 時に整合済み）
+//
+// これにより calcElapsedSeconds は「adjusted_start から now まで」
+// = total_seconds + (now - resume_time) を正確に返す。
+// =============================================
+timer.post('/resume-frozen', async (c) => {
+  const userId = c.get('userId');
+  const db = c.env.DB;
+
+  const session = await getActiveSession(db, userId);
+
+  if (!session) {
+    return c.json({ success: false, error: '再開するセッションがありません' }, 404);
+  }
+  if (session.status !== 'frozen') {
+    return c.json({ success: false, error: 'セッションは凍結状態ではありません' }, 409);
+  }
+
+  const now = new Date().toISOString();
+  const savedSeconds = session.total_seconds;
+
+  // 「now - savedSeconds 秒前」を新しい started_at にする
+  // → calcElapsedSeconds(state) = (now - adjusted_start) = savedSeconds + 経過秒数
+  const adjustedStartMs = Date.now() - savedSeconds * 1000;
+  const adjustedStartAt = new Date(adjustedStartMs).toISOString();
+
+  await db.prepare(
+    `UPDATE study_sessions
+     SET status = 'running',
+         started_at = ?,
+         frozen_at = NULL,
+         total_seconds = 0,
+         updated_at = ?
+     WHERE id = ?`
+  ).bind(adjustedStartAt, now, session.id).run();
+
+  // pause ログも不要（freeze 時にすべて閉じ済み）
+  // ただし古い pause ログが残っているとズレるので削除
+  await db.prepare(
+    `DELETE FROM session_pauses WHERE session_id = ?`
+  ).bind(session.id).run();
+
+  const updated = await db.prepare(
+    'SELECT * FROM study_sessions WHERE id = ?'
+  ).bind(session.id).first<StudySessionRecord>();
+
+  const state = await buildTimerState(db, updated!);
+  return c.json({
+    success: true,
+    message: '再開しました！',
+    data: state,
+  });
+});
+
+// =============================================
+// POST /api/timer/finish-frozen - 凍結状態からそのまま終了
+//
+// 「ここで終了する」ボタンを押した時に呼ぶ。
+// frozen 時点で確定済みの total_seconds でそのまま終了する。
+// 確認ダイアログが表示されていた間の時間は一切加算しない。
+// =============================================
+timer.post('/finish-frozen', async (c) => {
   const userId = c.get('userId');
   const db = c.env.DB;
 
@@ -290,77 +437,20 @@ timer.post('/finish-abandoned', async (c) => {
   if (!session) {
     return c.json({ success: false, error: '終了するセッションがありません' }, 404);
   }
+  if (session.status !== 'frozen') {
+    return c.json({ success: false, error: 'セッションは凍結状態ではありません' }, 409);
+  }
 
   const now = new Date().toISOString();
-
-  // ─────────────────────────────────────────────────────────
-  // 「勝手に長時間加算しない」ルールの実装
-  //
-  // running 状態で放置されていたセッションは、
-  // 「ユーザーが確認ダイアログを開いた瞬間まで」の
-  // 勉強時間のみを記録する。
-  //
-  // 具体的な処理:
-  //   running → 一時停止ログなし or 全て resume 済み
-  //     → 通常通り now を finish_at として計算
-  //   paused  → resume_at=null の一時停止ログがある
-  //     → その pause_at までの時間で計算（放置分は無視）
-  // ─────────────────────────────────────────────────────────
-
-  let finishedAt = now;
-  let totalSeconds = 0;
-
-  if (session.status === 'paused') {
-    // ─── 一時停止中のまま離脱していた場合 ───
-    // 「pause_at の時点」が実質的な勉強終了時刻。
-    // その時点までの勉強時間 = started_at〜pause_at の間から
-    // それ以前の一時停止時間を引いた値。
-    //
-    // 手順:
-    // 1. 最後の pause_at を取得（resume_at=null のもの）
-    // 2. その pause_at を finishedAt として計算
-    // 3. resume_at を pause_at（= finishedAt）でクローズ
-    //    （DB の整合性のため。計算後に更新する）
-    const lastPauseRow = await db.prepare(
-      `SELECT id, pause_at FROM session_pauses
-       WHERE session_id = ? AND resume_at IS NULL
-       ORDER BY pause_at DESC LIMIT 1`
-    ).bind(session.id).first<{ id: number; pause_at: string }>();
-
-    const effectiveFinishAt = lastPauseRow ? lastPauseRow.pause_at : session.started_at;
-    finishedAt = effectiveFinishAt;
-
-    // finishedAt = pause_at で計算するので、
-    // pauses の resume_at が null のまま getPauses しても
-    // calcTotalSeconds 内では「pause〜finishedAt」の時間は
-    // 一時停止として差し引かれないことを保証するため
-    // finishedAt 以前に resume_at=null のものだけ収集して計算する
-    const allPauses = await getPauses(db, session.id);
-    const closedPauses = allPauses.map(p => ({
-      ...p,
-      // resume_at が null（今回の一時停止）は finishedAt（= pause_at）で閉じる
-      // → start〜pause_at の差が 0 なので差し引き量も 0 になり正しく計算される
-      resume_at: p.resume_at ?? effectiveFinishAt,
-    }));
-    totalSeconds = calcTotalSeconds(session.started_at, finishedAt, closedPauses);
-
-    // DB の一時停止ログを閉じる（整合性保持）
-    await db.prepare(
-      `UPDATE session_pauses SET resume_at = ? WHERE session_id = ? AND resume_at IS NULL`
-    ).bind(now, session.id).run();
-
-  } else {
-    // ─── running のまま離脱していた場合 ───
-    // ダイアログを開いた「今 (now)」を終了時刻とみなす。
-    const pauses = await getPauses(db, session.id);
-    totalSeconds = calcTotalSeconds(session.started_at, finishedAt, pauses);
-  }
+  const totalSeconds = session.total_seconds; // 凍結時に確定済み
 
   await db.prepare(
     `UPDATE study_sessions
-     SET status = 'finished', finished_at = ?, total_seconds = ?, updated_at = ?
+     SET status = 'finished',
+         finished_at = ?,
+         updated_at = ?
      WHERE id = ?`
-  ).bind(finishedAt, totalSeconds, now, session.id).run();
+  ).bind(now, now, session.id).run();
 
   const updated = await db.prepare(
     'SELECT * FROM study_sessions WHERE id = ?'
@@ -370,6 +460,69 @@ timer.post('/finish-abandoned', async (c) => {
   return c.json({
     success: true,
     message: `記録しました！${formatSeconds(totalSeconds)}勉強しました`,
+    data: state,
+  });
+});
+
+// =============================================
+// POST /api/timer/finish-abandoned (後方互換)
+// 旧エンドポイント。finish-frozen に委譲。
+// =============================================
+timer.post('/finish-abandoned', async (c) => {
+  // freeze してから finish-frozen を呼ぶ流れにリダイレクト
+  const userId = c.get('userId');
+  const db = c.env.DB;
+
+  const session = await getActiveSession(db, userId);
+  if (!session) {
+    return c.json({ success: false, error: '終了するセッションがありません' }, 404);
+  }
+
+  const now = new Date().toISOString();
+
+  if (session.status !== 'frozen') {
+    // まず freeze する
+    let totalSeconds = 0;
+    if (session.status === 'paused') {
+      const allPauses = await getPauses(db, session.id);
+      const lastOpenPause = allPauses.filter(p => !p.resume_at)[0];
+      const effectiveEnd = lastOpenPause ? lastOpenPause.pause_at : now;
+      const closedPauses = allPauses.map(p => ({
+        pause_at: p.pause_at,
+        resume_at: p.resume_at ?? effectiveEnd,
+      }));
+      totalSeconds = calcTotalSeconds(session.started_at, effectiveEnd, closedPauses);
+      await db.prepare(
+        `UPDATE session_pauses SET resume_at = ? WHERE session_id = ? AND resume_at IS NULL`
+      ).bind(effectiveEnd, session.id).run();
+    } else {
+      const pauses = await getPauses(db, session.id);
+      totalSeconds = calcTotalSeconds(session.started_at, now, pauses);
+    }
+    await db.prepare(
+      `UPDATE study_sessions SET status = 'frozen', frozen_at = ?, total_seconds = ?, updated_at = ? WHERE id = ?`
+    ).bind(now, totalSeconds, now, session.id).run();
+  }
+
+  // frozen 状態で終了
+  const savedSeconds = (session.status === 'frozen') ? session.total_seconds
+    : (() => {
+      // 計算済みの値を取り出し
+      return session.total_seconds;
+    })();
+
+  await db.prepare(
+    `UPDATE study_sessions SET status = 'finished', finished_at = ?, updated_at = ? WHERE id = ?`
+  ).bind(now, now, session.id).run();
+
+  const updated = await db.prepare(
+    'SELECT * FROM study_sessions WHERE id = ?'
+  ).bind(session.id).first<StudySessionRecord>();
+
+  const state = await buildTimerState(db, updated!);
+  return c.json({
+    success: true,
+    message: `記録しました！${formatSeconds(updated!.total_seconds)}勉強しました`,
     data: state,
   });
 });
