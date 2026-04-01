@@ -587,6 +587,63 @@ app.get('*', (c) => {
   </div>
 </div>
 
+<!-- =============================================
+     未終了セッション確認ダイアログ（オーバーレイ）
+     タイマー画面を開いた時に未終了セッションがある場合に表示
+     ============================================= -->
+<div id="abandoned-dialog" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-end sm:items-center justify-center z-50 p-4">
+  <div class="bg-white rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden">
+
+    <!-- ダイアログヘッダー -->
+    <div class="bg-gradient-to-r from-amber-400 to-orange-400 px-6 py-4 text-white text-center">
+      <div class="text-3xl mb-1">⚠️</div>
+      <h2 class="text-lg font-bold">前回の勉強が終了されていません</h2>
+    </div>
+
+    <!-- セッション情報 -->
+    <div class="px-6 py-4 bg-amber-50 border-b border-amber-100">
+      <div class="flex items-center justify-between text-sm mb-1">
+        <span class="text-gray-500">開始時刻</span>
+        <span id="abandoned-started-at" class="font-medium text-gray-700">-</span>
+      </div>
+      <div class="flex items-center justify-between text-sm mb-1">
+        <span class="text-gray-500">状態</span>
+        <span id="abandoned-status" class="font-medium text-gray-700">-</span>
+      </div>
+      <div class="flex items-center justify-between text-sm">
+        <span class="text-gray-500">それまでの勉強時間</span>
+        <span id="abandoned-elapsed" class="font-bold text-amber-600">-</span>
+      </div>
+    </div>
+
+    <!-- 選択肢 -->
+    <div class="px-6 py-5 space-y-3">
+      <p class="text-sm text-gray-500 text-center mb-4">どうしますか？</p>
+
+      <!-- 再開する -->
+      <button
+        id="abandoned-btn-resume"
+        onclick="handleAbandonedResume()"
+        class="w-full bg-gradient-to-r from-pink-400 to-purple-400 hover:from-pink-500 hover:to-purple-500 text-white font-bold py-4 rounded-xl flex items-center justify-center gap-2 shadow-md transition-all"
+      >
+        <i class="fas fa-play"></i>
+        再開する
+      </button>
+
+      <!-- ここで終了する -->
+      <button
+        id="abandoned-btn-finish"
+        onclick="handleAbandonedFinish()"
+        class="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold py-4 rounded-xl flex items-center justify-center gap-2 transition-colors"
+      >
+        <i class="fas fa-flag-checkered text-gray-500"></i>
+        ここで終了する
+      </button>
+    </div>
+
+  </div>
+</div>
+
 <!-- ローディングオーバーレイ -->
 <div id="loading-overlay" class="hidden fixed inset-0 bg-white bg-opacity-70 flex items-center justify-center z-50">
   <div class="text-center">
@@ -818,18 +875,44 @@ let timerIntervalId = null; // setIntervalのID
 // -----------------------------------------------
 async function initTimerPage() {
   clearTimerError();
-  // サーバーから現在のセッション状態を取得（未終了セッション復元対応）
+  stopTimerTick();
+
+  // まず画面を必ずリセット状態にする
+  // （前回のフィニッシュ後の数字が残らないようにする）
+  resetTimerDisplay();
+
+  // サーバーから現在のセッション状態を取得
+  let serverState = null;
   try {
     const res = await fetch('/api/timer/current', { credentials: 'include' });
     const data = await res.json();
     if (data.success) {
-      timerState = data.data; // null なら待機中
+      serverState = data.data;
     }
   } catch (err) {
-    timerState = null;
+    serverState = null;
   }
-  renderTimerUI();
-  startTimerTick();
+
+  if (serverState && (serverState.status === 'running' || serverState.status === 'paused')) {
+    // ─── 未終了セッションがある → 確認ダイアログを表示 ───
+    showAbandonedDialog(serverState);
+  } else {
+    // ─── 未終了セッションなし → 通常のタイマー初期状態 ───
+    timerState = null;
+    renderTimerUI();
+    startTimerTick();
+  }
+}
+
+// -----------------------------------------------
+// タイマー表示を 00:00:00 にリセットする
+// （フィニッシュ後に再度開いたとき前回の数字が残らないように）
+// -----------------------------------------------
+function resetTimerDisplay() {
+  const display = document.getElementById('timer-display');
+  if (display) display.textContent = '00:00:00';
+  const resultCard = document.getElementById('timer-result-card');
+  if (resultCard) resultCard.classList.add('hidden');
 }
 
 // -----------------------------------------------
@@ -1069,7 +1152,115 @@ async function handleTimerFinish() {
 // -----------------------------------------------
 function handleTimerBack() {
   stopTimerTick();
+  closeAbandonedDialog();
   showPage('page-home');
+}
+
+// =============================================
+// 未終了セッション確認ダイアログ
+// =============================================
+
+// -----------------------------------------------
+// ダイアログを表示し、セッション情報を埋め込む
+// -----------------------------------------------
+function showAbandonedDialog(state) {
+  // 開始時刻を日本語表記に変換
+  const startedDate = new Date(state.started_at);
+  const startedStr = startedDate.toLocaleString('ja-JP', {
+    month: 'numeric', day: 'numeric',
+    hour: '2-digit', minute: '2-digit'
+  });
+  document.getElementById('abandoned-started-at').textContent = startedStr;
+
+  // 状態の日本語表記
+  const statusLabel = state.status === 'running' ? '勉強中のまま離脱' : '一時停止中のまま離脱';
+  document.getElementById('abandoned-status').textContent = statusLabel;
+
+  // それまでの経過勉強時間を計算して表示
+  // ただし「勉強中のまま離脱」の場合は started_at〜現在ではなく
+  // started_at〜最後に確認できる時点（= 現在）で計算する
+  // ユーザーに「これだけ勉強していたことになります」と示す
+  const elapsedSec = calcElapsedSeconds(state);
+  document.getElementById('abandoned-elapsed').textContent = formatSecondsJa(elapsedSec);
+
+  // ダイアログを表示（タイマー画面の後ろに設定）
+  document.getElementById('abandoned-dialog').classList.remove('hidden');
+}
+
+// -----------------------------------------------
+// ダイアログを閉じる
+// -----------------------------------------------
+function closeAbandonedDialog() {
+  document.getElementById('abandoned-dialog').classList.add('hidden');
+}
+
+// -----------------------------------------------
+// 「再開する」ボタン
+// -----------------------------------------------
+async function handleAbandonedResume() {
+  setButtonDisabled('abandoned-btn-resume', true);
+  setButtonDisabled('abandoned-btn-finish', true);
+  try {
+    // 再度 current を取得して timerState にセット
+    const res = await fetch('/api/timer/current', { credentials: 'include' });
+    const data = await res.json();
+    if (data.success && data.data) {
+      timerState = data.data;
+      closeAbandonedDialog();
+      renderTimerUI();
+      startTimerTick();
+    } else {
+      // セッションが見つからない場合は初期状態に
+      timerState = null;
+      closeAbandonedDialog();
+      renderTimerUI();
+      startTimerTick();
+    }
+  } catch (err) {
+    showTimerError('通信エラーが発生しました');
+    setButtonDisabled('abandoned-btn-resume', false);
+    setButtonDisabled('abandoned-btn-finish', false);
+  }
+}
+
+// -----------------------------------------------
+// 「ここで終了する」ボタン
+// -----------------------------------------------
+async function handleAbandonedFinish() {
+  setButtonDisabled('abandoned-btn-resume', true);
+  setButtonDisabled('abandoned-btn-finish', true);
+  try {
+    const res = await fetch('/api/timer/finish-abandoned', {
+      method: 'POST',
+      credentials: 'include',
+    });
+    const data = await res.json();
+    if (data.success) {
+      timerState = data.data;
+      closeAbandonedDialog();
+
+      // 確定した秒数を表示
+      const display = document.getElementById('timer-display');
+      display.textContent = formatSecondsDisplay(timerState.total_seconds);
+
+      // 結果カードを表示
+      const resultCard = document.getElementById('timer-result-card');
+      const resultTime = document.getElementById('timer-result-time');
+      resultTime.textContent = formatSecondsJa(timerState.total_seconds);
+      resultCard.classList.remove('hidden');
+
+      renderTimerUI();
+      stopTimerTick();
+    } else {
+      showTimerError(data.error || '終了処理に失敗しました');
+      setButtonDisabled('abandoned-btn-resume', false);
+      setButtonDisabled('abandoned-btn-finish', false);
+    }
+  } catch (err) {
+    showTimerError('通信エラーが発生しました');
+    setButtonDisabled('abandoned-btn-resume', false);
+    setButtonDisabled('abandoned-btn-finish', false);
+  }
 }
 
 // -----------------------------------------------
