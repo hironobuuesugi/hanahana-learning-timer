@@ -65,3 +65,45 @@ export type AuthResponse = {
   session_token: string;
   user: UserResponse;
 }
+
+// =============================================
+// タイマー関連型
+// =============================================
+
+// セッション状態
+export type StudySessionStatus = 'running' | 'paused' | 'finished';
+
+// 勉強セッションのDBレコード型
+export type StudySessionRecord = {
+  id: number;
+  user_id: number;
+  status: StudySessionStatus;
+  started_at: string;        // ISO8601
+  finished_at: string | null;
+  total_seconds: number;
+  created_at: string;
+  updated_at: string;
+}
+
+// 一時停止ログのDBレコード型
+export type SessionPauseRecord = {
+  id: number;
+  session_id: number;
+  pause_at: string;          // ISO8601
+  resume_at: string | null;  // 一時停止中はNULL
+}
+
+// フロントエンドに返すタイマー状態型
+// フロントはこのデータを元に経過時間を表示する
+export type TimerStateResponse = {
+  session_id: number;
+  status: StudySessionStatus;
+  started_at: string;
+  finished_at: string | null;
+  total_seconds: number;     // フィニッシュ時に確定した秒数
+  // 一時停止ログ（フロントでの経過時間計算に使用）
+  pauses: Array<{
+    pause_at: string;
+    resume_at: string | null;
+  }>;
+}

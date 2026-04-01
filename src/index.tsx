@@ -7,6 +7,7 @@ import { cors } from 'hono/cors'
 import { logger } from 'hono/logger'
 import { serveStatic } from 'hono/cloudflare-workers'
 import authRoutes from './routes/auth'
+import timerRoutes from './routes/timer'
 import { authMiddleware } from './middleware/auth'
 import type { Bindings, Variables } from './types'
 
@@ -28,6 +29,7 @@ app.use('/static/*', serveStatic({ root: './public' }))
 // APIルート登録
 // =============================================
 app.route('/api/auth', authRoutes)
+app.route('/api/timer', timerRoutes)
 
 // =============================================
 // フロントエンドページ（SPA形式）
@@ -399,11 +401,14 @@ app.get('*', (c) => {
         </h3>
         <div class="grid grid-cols-2 gap-3">
 
-          <!-- タイマー（準備中） -->
-          <div class="card p-4 opacity-60 cursor-not-allowed">
+          <!-- タイマー（使用可能） -->
+          <div
+            class="card p-4 cursor-pointer hover:shadow-md transition-shadow border-2 border-pink-100 hover:border-pink-300"
+            onclick="showPage('page-timer'); initTimerPage()"
+          >
             <div class="text-3xl mb-2">⏱️</div>
             <p class="font-medium text-gray-700 text-sm">勉強タイマー</p>
-            <p class="text-xs text-gray-400 mt-1">準備中...</p>
+            <p class="text-xs text-pink-400 mt-1 font-medium">タップして開始→</p>
           </div>
 
           <!-- 勉強記録（準備中） -->
@@ -452,8 +457,19 @@ app.get('*', (c) => {
         </div>
       </div>
 
-      <!-- ログアウトボタン（モバイル向け大きめ） -->
+      <!-- 勉強タイマーを始めるボタン（大きめ） -->
       <div class="mt-6">
+        <button
+          onclick="showPage('page-timer'); initTimerPage()"
+          class="btn-primary w-full text-white font-bold py-4 rounded-xl flex items-center justify-center gap-3 text-lg shadow-md"
+        >
+          <span class="text-2xl">⏱️</span>
+          勉強タイマーを始める
+        </button>
+      </div>
+
+      <!-- ログアウトボタン（モバイル向け大きめ） -->
+      <div class="mt-3">
         <button
           onclick="handleLogout()"
           class="w-full bg-gray-100 hover:bg-red-50 text-gray-600 hover:text-red-500 font-medium py-3 rounded-lg transition-colors flex items-center justify-center gap-2"
@@ -462,6 +478,110 @@ app.get('*', (c) => {
           ログアウト
         </button>
       </div>
+
+    </main>
+  </div>
+</div>
+
+<!-- =============================================
+     ページ4: タイマー画面
+     ============================================= -->
+<div id="page-timer" class="page">
+  <div class="min-h-screen">
+
+    <!-- ヘッダー -->
+    <header class="bg-white shadow-sm sticky top-0 z-10">
+      <div class="max-w-lg mx-auto px-4 py-3 flex items-center justify-between">
+        <button
+          onclick="handleTimerBack()"
+          class="text-gray-500 hover:text-gray-700 flex items-center gap-1 transition-colors"
+        >
+          <i class="fas fa-chevron-left"></i>
+          <span class="text-sm">ホーム</span>
+        </button>
+        <span class="font-bold text-transparent bg-clip-text bg-gradient-to-r from-pink-400 to-purple-400 text-sm">
+          ⏱️ 勉強タイマー
+        </span>
+        <div class="w-16"></div><!-- スペーサー -->
+      </div>
+    </header>
+
+    <main class="max-w-lg mx-auto px-4 py-8">
+
+      <!-- タイマーメインカード -->
+      <div class="card p-8 mb-6 text-center">
+
+        <!-- 状態バッジ -->
+        <div class="mb-4 flex justify-center">
+          <span id="timer-status-badge" class="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-500">
+            <span id="timer-status-dot" class="w-2 h-2 rounded-full bg-gray-400 inline-block"></span>
+            <span id="timer-status-text">待機中</span>
+          </span>
+        </div>
+
+        <!-- 経過時間表示 -->
+        <div class="mb-8">
+          <div id="timer-display" class="text-6xl font-mono font-bold text-gray-800 tabular-nums leading-none">
+            00:00:00
+          </div>
+          <p class="text-sm text-gray-400 mt-2" id="timer-sub-text">スタートを押して勉強を始めよう！</p>
+        </div>
+
+        <!-- ボタングループ -->
+        <div id="timer-buttons" class="space-y-3">
+
+          <!-- スタートボタン -->
+          <button
+            id="btn-start"
+            onclick="handleTimerStart()"
+            class="btn-primary w-full text-white font-bold py-4 rounded-xl text-lg flex items-center justify-center gap-2 shadow-md"
+          >
+            <i class="fas fa-play"></i> スタート
+          </button>
+
+          <!-- 一時停止ボタン -->
+          <button
+            id="btn-pause"
+            onclick="handleTimerPause()"
+            class="hidden w-full bg-amber-400 hover:bg-amber-500 text-white font-bold py-4 rounded-xl text-lg flex items-center justify-center gap-2 shadow-md transition-colors"
+          >
+            <i class="fas fa-pause"></i> 一時停止
+          </button>
+
+          <!-- 再開ボタン -->
+          <button
+            id="btn-resume"
+            onclick="handleTimerResume()"
+            class="hidden w-full bg-emerald-400 hover:bg-emerald-500 text-white font-bold py-4 rounded-xl text-lg flex items-center justify-center gap-2 shadow-md transition-colors"
+          >
+            <i class="fas fa-play"></i> 再開
+          </button>
+
+          <!-- フィニッシュボタン -->
+          <button
+            id="btn-finish"
+            onclick="handleTimerFinish()"
+            class="hidden w-full bg-purple-400 hover:bg-purple-500 text-white font-bold py-4 rounded-xl text-lg flex items-center justify-center gap-2 shadow-md transition-colors"
+          >
+            <i class="fas fa-flag-checkered"></i> フィニッシュ
+          </button>
+
+        </div>
+
+      </div>
+
+      <!-- 結果カード（フィニッシュ後に表示） -->
+      <div id="timer-result-card" class="hidden card p-6 text-center mb-6 bg-gradient-to-br from-pink-50 to-purple-50">
+        <div class="text-4xl mb-3">🎉</div>
+        <h3 class="text-lg font-bold text-gray-800 mb-1">お疲れ様でした！</h3>
+        <p class="text-sm text-gray-500 mb-3">今回の勉強時間</p>
+        <div id="timer-result-time" class="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-pink-400 to-purple-400">
+          -
+        </div>
+      </div>
+
+      <!-- エラーメッセージ -->
+      <div id="timer-error" class="hidden error-msg bg-red-50 border border-red-200 text-red-600 text-sm rounded-lg p-3 mb-4 text-center"></div>
 
     </main>
   </div>
@@ -683,6 +803,292 @@ function updateHomeScreen(user) {
 }
 
 // フォームタグのonsubmitでEnterキー送信をハンドリング済み
+
+// =============================================
+// タイマー機能
+// =============================================
+
+// タイマーの内部状態
+// サーバーから取得した時刻データをもとに経過時間を計算する
+let timerState = null;   // APIから取得したTimerStateResponse
+let timerIntervalId = null; // setIntervalのID
+
+// -----------------------------------------------
+// タイマーページ初期化（ホームから遷移してきた時）
+// -----------------------------------------------
+async function initTimerPage() {
+  clearTimerError();
+  // サーバーから現在のセッション状態を取得（未終了セッション復元対応）
+  try {
+    const res = await fetch('/api/timer/current', { credentials: 'include' });
+    const data = await res.json();
+    if (data.success) {
+      timerState = data.data; // null なら待機中
+    }
+  } catch (err) {
+    timerState = null;
+  }
+  renderTimerUI();
+  startTimerTick();
+}
+
+// -----------------------------------------------
+// タイマーUIを状態に合わせて描画する
+// -----------------------------------------------
+function renderTimerUI() {
+  const status = timerState ? timerState.status : 'idle';
+
+  // 結果カードを隠す（finishedでなければ）
+  const resultCard = document.getElementById('timer-result-card');
+  if (status !== 'finished') {
+    resultCard.classList.add('hidden');
+  }
+
+  // ステータスバッジ
+  const badge    = document.getElementById('timer-status-badge');
+  const dot      = document.getElementById('timer-status-dot');
+  const statusTx = document.getElementById('timer-status-text');
+  const subText  = document.getElementById('timer-sub-text');
+
+  const statusMap = {
+    idle:     { label: '待機中',     dotColor: 'bg-gray-400',    badgeColor: 'bg-gray-100 text-gray-500' },
+    running:  { label: '勉強中',     dotColor: 'bg-green-400 animate-pulse', badgeColor: 'bg-green-100 text-green-600' },
+    paused:   { label: '一時停止中', dotColor: 'bg-amber-400',   badgeColor: 'bg-amber-100 text-amber-600' },
+    finished: { label: '終了',       dotColor: 'bg-purple-400',  badgeColor: 'bg-purple-100 text-purple-600' },
+  };
+  const s = statusMap[status] || statusMap.idle;
+  dot.className = 'w-2 h-2 rounded-full inline-block ' + s.dotColor;
+  statusTx.textContent = s.label;
+  badge.className = 'inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium ' + s.badgeColor;
+
+  // サブテキスト
+  const subMap = {
+    idle:     'スタートを押して勉強を始めよう！',
+    running:  '集中して頑張ろう！💪',
+    paused:   '一時停止中... 再開できるよ',
+    finished: 'お疲れ様でした！🌸',
+  };
+  subText.textContent = subMap[status] || '';
+
+  // ボタン表示制御
+  document.getElementById('btn-start').classList.toggle('hidden',  status !== 'idle');
+  document.getElementById('btn-pause').classList.toggle('hidden',  status !== 'running');
+  document.getElementById('btn-resume').classList.toggle('hidden', status !== 'paused');
+  document.getElementById('btn-finish').classList.toggle('hidden', status === 'idle' || status === 'finished');
+}
+
+// -----------------------------------------------
+// 1秒ごとに経過時間を計算して表示する
+// -----------------------------------------------
+function startTimerTick() {
+  stopTimerTick(); // 二重起動防止
+  timerIntervalId = setInterval(() => {
+    const display = document.getElementById('timer-display');
+    if (!timerState || timerState.status === 'idle' || timerState.status === 'finished') {
+      // 待機中・終了後は表示をそのままにする
+      return;
+    }
+    const elapsed = calcElapsedSeconds(timerState);
+    display.textContent = formatSecondsDisplay(elapsed);
+  }, 1000);
+}
+
+function stopTimerTick() {
+  if (timerIntervalId !== null) {
+    clearInterval(timerIntervalId);
+    timerIntervalId = null;
+  }
+}
+
+// -----------------------------------------------
+// 経過秒数を計算する（フロント側）
+// started_at からの経過時間 - 一時停止時間の合計
+// -----------------------------------------------
+function calcElapsedSeconds(state) {
+  if (!state) return 0;
+
+  const now   = Date.now();
+  const start = new Date(state.started_at).getTime();
+  let elapsed = Math.floor((now - start) / 1000);
+
+  // 一時停止時間を差し引く
+  for (const pause of state.pauses) {
+    const pauseMs  = new Date(pause.pause_at).getTime();
+    const resumeMs = pause.resume_at ? new Date(pause.resume_at).getTime() : now;
+    elapsed -= Math.floor((resumeMs - pauseMs) / 1000);
+  }
+
+  return Math.max(0, elapsed);
+}
+
+// -----------------------------------------------
+// 秒数を HH:MM:SS 形式に変換
+// -----------------------------------------------
+function formatSecondsDisplay(sec) {
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
+  return [
+    String(h).padStart(2, '0'),
+    String(m).padStart(2, '0'),
+    String(s).padStart(2, '0'),
+  ].join(':');
+}
+
+// -----------------------------------------------
+// 秒数を「X時間Y分Z秒」形式に変換
+// -----------------------------------------------
+function formatSecondsJa(sec) {
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
+  if (h > 0) return h + '時間' + m + '分' + s + '秒';
+  if (m > 0) return m + '分' + s + '秒';
+  return s + '秒';
+}
+
+// -----------------------------------------------
+// スタート
+// -----------------------------------------------
+async function handleTimerStart() {
+  clearTimerError();
+  setButtonDisabled('btn-start', true);
+  try {
+    const res = await fetch('/api/timer/start', {
+      method: 'POST',
+      credentials: 'include',
+    });
+    const data = await res.json();
+    if (data.success) {
+      timerState = data.data;
+      renderTimerUI();
+    } else {
+      showTimerError(data.error || 'スタートに失敗しました');
+      // すでに進行中のセッションがある場合は状態を復元
+      if (data.data) {
+        timerState = data.data;
+        renderTimerUI();
+      }
+    }
+  } catch (err) {
+    showTimerError('通信エラーが発生しました');
+  } finally {
+    setButtonDisabled('btn-start', false);
+  }
+}
+
+// -----------------------------------------------
+// 一時停止
+// -----------------------------------------------
+async function handleTimerPause() {
+  clearTimerError();
+  setButtonDisabled('btn-pause', true);
+  try {
+    const res = await fetch('/api/timer/pause', {
+      method: 'POST',
+      credentials: 'include',
+    });
+    const data = await res.json();
+    if (data.success) {
+      timerState = data.data;
+      renderTimerUI();
+    } else {
+      showTimerError(data.error || '一時停止に失敗しました');
+    }
+  } catch (err) {
+    showTimerError('通信エラーが発生しました');
+  } finally {
+    setButtonDisabled('btn-pause', false);
+  }
+}
+
+// -----------------------------------------------
+// 再開
+// -----------------------------------------------
+async function handleTimerResume() {
+  clearTimerError();
+  setButtonDisabled('btn-resume', true);
+  try {
+    const res = await fetch('/api/timer/resume', {
+      method: 'POST',
+      credentials: 'include',
+    });
+    const data = await res.json();
+    if (data.success) {
+      timerState = data.data;
+      renderTimerUI();
+    } else {
+      showTimerError(data.error || '再開に失敗しました');
+    }
+  } catch (err) {
+    showTimerError('通信エラーが発生しました');
+  } finally {
+    setButtonDisabled('btn-resume', false);
+  }
+}
+
+// -----------------------------------------------
+// フィニッシュ
+// -----------------------------------------------
+async function handleTimerFinish() {
+  clearTimerError();
+  setButtonDisabled('btn-finish', true);
+  try {
+    const res = await fetch('/api/timer/finish', {
+      method: 'POST',
+      credentials: 'include',
+    });
+    const data = await res.json();
+    if (data.success) {
+      timerState = data.data;
+
+      // 表示を確定した秒数に固定
+      const display = document.getElementById('timer-display');
+      display.textContent = formatSecondsDisplay(timerState.total_seconds);
+
+      // 結果カードを表示
+      const resultCard = document.getElementById('timer-result-card');
+      const resultTime = document.getElementById('timer-result-time');
+      resultTime.textContent = formatSecondsJa(timerState.total_seconds);
+      resultCard.classList.remove('hidden');
+
+      renderTimerUI();
+      stopTimerTick();
+    } else {
+      showTimerError(data.error || 'フィニッシュに失敗しました');
+    }
+  } catch (err) {
+    showTimerError('通信エラーが発生しました');
+  } finally {
+    setButtonDisabled('btn-finish', false);
+  }
+}
+
+// -----------------------------------------------
+// ホームに戻る（タイマー動作中でも戻れるが状態は保持）
+// -----------------------------------------------
+function handleTimerBack() {
+  stopTimerTick();
+  showPage('page-home');
+}
+
+// -----------------------------------------------
+// タイマーUI用ヘルパー
+// -----------------------------------------------
+function showTimerError(msg) {
+  const el = document.getElementById('timer-error');
+  el.textContent = msg;
+  el.classList.remove('hidden');
+}
+function clearTimerError() {
+  const el = document.getElementById('timer-error');
+  el.classList.add('hidden');
+  el.textContent = '';
+}
+function setButtonDisabled(id, disabled) {
+  const btn = document.getElementById(id);
+  if (btn) btn.disabled = disabled;
+}
 
 // =============================================
 // 初期化: 既存セッションの確認
