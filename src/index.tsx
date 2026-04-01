@@ -1517,8 +1517,12 @@ async function handleTimerFinish() {
       stopTimerTick();
       renderTimerUI();
 
-      // 記録入力ダイアログを表示
-      showRecordDialog(timerState.session_id, timerState.total_seconds);
+      // 60秒未満は記録ダイアログを出さずメッセージのみ表示
+      if (timerState.total_seconds < 60) {
+        showTimerSuccess('1分未満の勉強は記録されません');
+      } else {
+        showRecordDialog(timerState.session_id, timerState.total_seconds);
+      }
     } else {
       showTimerError(data.error || 'フィニッシュに失敗しました');
       setButtonDisabled('btn-finish', false);
@@ -1672,8 +1676,12 @@ async function handleAbandonedFinish() {
       stopTimerTick();
       renderTimerUI();
 
-      // 記録入力ダイアログを表示
-      showRecordDialog(timerState.session_id, timerState.total_seconds);
+      // 60秒未満は記録ダイアログを出さずメッセージのみ表示
+      if (timerState.total_seconds < 60) {
+        showTimerSuccess('1分未満の勉強は記録されません');
+      } else {
+        showRecordDialog(timerState.session_id, timerState.total_seconds);
+      }
 
     } else {
       showTimerError(data.error || '終了処理に失敗しました。もう一度お試しください');

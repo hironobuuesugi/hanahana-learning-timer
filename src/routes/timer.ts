@@ -521,6 +521,11 @@ timer.post('/record', async (c) => {
     return c.json({ success: false, error: '記録対象のセッションが見つかりません' }, 404);
   }
 
+  // 60秒未満のセッションは保存不可
+  if ((session.total_seconds ?? 0) < 60) {
+    return c.json({ success: false, error: '1分未満の勉強は記録できません' }, 422);
+  }
+
   // 既に記録済みかチェック
   if ((session as any).subject) {
     return c.json({ success: false, error: 'すでに記録済みです' }, 409);
