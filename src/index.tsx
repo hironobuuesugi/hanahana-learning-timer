@@ -1288,6 +1288,40 @@ function resetTimerDisplay() {
 }
 
 // -----------------------------------------------
+// タイマー状態を完全に初期状態へリセットする
+//
+// 呼び出しタイミング:
+//   - 記録保存完了後（handleRecordSave の成功時）
+//   - 60秒未満フィニッシュ後（記録せずに終わる場合）
+//
+// 内部状態・ボタン disabled・表示をすべてクリアして
+// 「新しいセッションをすぐ開始できる idle 状態」に戻す。
+// -----------------------------------------------
+function resetTimerFull() {
+  // tick を止める
+  stopTimerTick();
+
+  // 内部状態をクリア
+  timerState = null;
+
+  // 表示リセット（00:00:00 + 結果カード非表示）
+  resetTimerDisplay();
+
+  // ボタンの disabled を全解除
+  // ※ handleTimerFinish で btn-finish が true のまま残るのを防ぐ
+  setButtonDisabled('btn-start',  false);
+  setButtonDisabled('btn-pause',  false);
+  setButtonDisabled('btn-resume', false);
+  setButtonDisabled('btn-finish', false);
+
+  // エラー・成功メッセージをクリア
+  clearTimerError();
+
+  // UI を idle 状態に描画（btn-start 表示、他は非表示）
+  renderTimerUI();
+}
+
+// -----------------------------------------------
 // タイマーUIを状態に合わせて描画する
 // -----------------------------------------------
 function renderTimerUI() {
@@ -1517,8 +1551,9 @@ async function handleTimerFinish() {
       stopTimerTick();
       renderTimerUI();
 
-      // 60秒未満は記録ダイアログを出さずメッセージのみ表示
+      // 60秒未満は記録ダイアログを出さずリセット＋メッセージのみ
       if (timerState.total_seconds < 60) {
+        resetTimerFull();
         showTimerSuccess('1分未満の勉強は記録されません');
       } else {
         showRecordDialog(timerState.session_id, timerState.total_seconds);
@@ -1676,8 +1711,9 @@ async function handleAbandonedFinish() {
       stopTimerTick();
       renderTimerUI();
 
-      // 60秒未満は記録ダイアログを出さずメッセージのみ表示
+      // 60秒未満は記録ダイアログを出さずリセット＋メッセージのみ
       if (timerState.total_seconds < 60) {
+        resetTimerFull();
         showTimerSuccess('1分未満の勉強は記録されません');
       } else {
         showRecordDialog(timerState.session_id, timerState.total_seconds);
@@ -1810,10 +1846,16 @@ async function handleRecordSave() {
       // ダイアログを閉じる
       document.getElementById('record-dialog').classList.add('hidden');
 
-      // 結果カードを表示
+      // 勉強時間を先に保存（resetTimerFull で timerState が null になる前に取得）
+      const savedSeconds = timerState ? timerState.total_seconds : 0;
+
+      // タイマー状態を完全リセット（次のセッションが正常に開始できるようにする）
+      resetTimerFull();
+
+      // 結果カードを表示（リセット後に改めて出す）
       const resultCard = document.getElementById('timer-result-card');
       const resultTime = document.getElementById('timer-result-time');
-      if (resultTime && timerState) resultTime.textContent = formatSecondsJa(timerState.total_seconds);
+      if (resultTime) resultTime.textContent = formatSecondsJa(savedSeconds);
       if (resultCard) resultCard.classList.remove('hidden');
 
       // 記録完了メッセージ
