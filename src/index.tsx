@@ -427,6 +427,17 @@ app.get('*', (c) => {
             <p class="text-lg font-bold text-green-600" id="home-stats-total">--</p>
           </div>
         </div>
+        <!-- 自己ベスト -->
+        <div class="mt-3 flex items-center justify-between bg-yellow-50 rounded-xl px-4 py-2">
+          <div class="flex items-center gap-2">
+            <span class="text-base">🏅</span>
+            <span class="text-xs font-medium text-yellow-700">自己ベスト</span>
+          </div>
+          <div class="text-right">
+            <span class="text-sm font-bold text-yellow-600" id="home-stats-best">--</span>
+            <span class="text-xs text-yellow-500 ml-2" id="home-stats-best-date"></span>
+          </div>
+        </div>
       </div>
 
       <!-- テスト日カード -->
@@ -1118,6 +1129,26 @@ async function fetchAndRenderStats() {
     if (weekEl)   weekEl.textContent   = formatSecondsJaShort(d.week_seconds);
     if (monthEl)  monthEl.textContent  = formatSecondsJaShort(d.month_seconds);
     if (totalEl)  totalEl.textContent  = formatSecondsJaShort(d.total_seconds);
+
+    // 自己ベスト表示
+    var bestEl     = document.getElementById('home-stats-best');
+    var bestDateEl = document.getElementById('home-stats-best-date');
+    if (bestEl) {
+      if (d.best_day_seconds > 0) {
+        bestEl.textContent = formatSecondsJaShort(d.best_day_seconds);
+      } else {
+        bestEl.textContent = 'まだありません';
+      }
+    }
+    if (bestDateEl) {
+      if (d.best_day_date) {
+        // YYYY-MM-DD → M/D 形式に変換して表示
+        var parts = d.best_day_date.split('-');
+        bestDateEl.textContent = parseInt(parts[1], 10) + '/' + parseInt(parts[2], 10);
+      } else {
+        bestDateEl.textContent = '';
+      }
+    }
   } catch (e) {
     // ネットワークエラーは集計欄を "--" のまま無視（既存機能に影響しない）
     console.warn('Stats fetch error:', e);

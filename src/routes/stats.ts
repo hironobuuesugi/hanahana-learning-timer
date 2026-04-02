@@ -7,10 +7,12 @@
 //   {
 //     success: true,
 //     data: {
-//       today_seconds:   number,  // 今日の勉強秒数
-//       week_seconds:    number,  // 今週の勉強秒数（月曜始まり）
-//       month_seconds:   number,  // 今月の勉強秒数
-//       total_seconds:   number,  // 累計勉強秒数
+//       today_seconds:    number,        // 今日の勉強秒数
+//       week_seconds:     number,        // 今週の勉強秒数（月曜始まり）
+//       month_seconds:    number,        // 今月の勉強秒数
+//       total_seconds:    number,        // 累計勉強秒数
+//       best_day_seconds: number,        // 自己ベスト（1日合計の最大値）秒数
+//       best_day_date:    string | null, // 自己ベストを出した日（JST YYYY-MM-DD）
 //     }
 //   }
 //
@@ -133,13 +135,31 @@ stats.get('/', async (c) => {
       AND subject       IS NOT NULL
   `).bind(userId).first<{ seconds: number }>();
 
+  // --- 自己ベスト（1日合計が最大の日）---
+  // JST 日付ごとに合計秒数を集計し、最大値の行を取得する
+  // date(started_at, '+9 hours') で JST 日付キーを生成（既存の集計と同じ基準）
+  const bestRow = await db.prepare(`
+    SELECT
+      date(started_at, '+9 hours')  AS jst_date,
+      SUM(total_seconds)            AS day_seconds
+    FROM study_sessions
+    WHERE user_id  = ?
+      AND status   = 'finished'
+      AND subject  IS NOT NULL
+    GROUP BY date(started_at, '+9 hours')
+    ORDER BY day_seconds DESC
+    LIMIT 1
+  `).bind(userId).first<{ jst_date: string; day_seconds: number }>();
+
   return c.json({
     success: true,
     data: {
-      today_seconds: todayRow?.seconds  ?? 0,
-      week_seconds:  weekRow?.seconds   ?? 0,
-      month_seconds: monthRow?.seconds  ?? 0,
-      total_seconds: totalRow?.seconds  ?? 0,
+      today_seconds:    todayRow?.seconds        ?? 0,
+      week_seconds:     weekRow?.seconds         ?? 0,
+      month_seconds:    monthRow?.seconds        ?? 0,
+      total_seconds:    totalRow?.seconds        ?? 0,
+      best_day_seconds: bestRow?.day_seconds     ?? 0,
+      best_day_date:    bestRow?.jst_date        ?? null,
     },
   });
 });
