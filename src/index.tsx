@@ -1254,14 +1254,37 @@ function formatSubjects(subjectStr) {
     .join(' / ');
 }
 
-// 日付文字列 (ISO8601) → "YYYY年M月D日（曜日）" 形式
+// UTC の ISO8601 文字列を日本時間（JST = UTC+9）に変換して Date を返すヘルパー
+// 例: "2026-04-01T18:30:00.000Z" → JST では 2026-04-02 03:30 なので 4月2日を返す
+function toJstDate(isoStr) {
+  const utcMs  = new Date(isoStr).getTime();
+  const jstMs  = utcMs + 9 * 60 * 60 * 1000;
+  return new Date(jstMs);
+}
+
+// UTC の ISO8601 文字列から JST の "YYYY-MM-DD" キーを生成する
+function isoToJstDateKey(isoStr) {
+  if (!isoStr) return 'unknown';
+  const jst = toJstDate(isoStr);
+  // getUTCFullYear/Month/Date は JST オフセット済みの値から UTC 部分を読む
+  const y = jst.getUTCFullYear();
+  const m = String(jst.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(jst.getUTCDate()).padStart(2, '0');
+  return y + '-' + m + '-' + d;
+}
+
+// 日付文字列 (ISO8601 UTC) → JST での "YYYY年M月D日（曜日）" 形式
 function formatDateJa(isoStr) {
   if (!isoStr) return '-';
-  const d   = new Date(isoStr);
+  // UTC ISO 文字列を JST に変換してから表示する
+  const jst = toJstDate(isoStr);
   const DOW = ['日', '月', '火', '水', '木', '金', '土'];
-  return d.toLocaleDateString('ja-JP', {
-    year: 'numeric', month: 'long', day: 'numeric',
-  }) + '（' + DOW[d.getDay()] + '）';
+  // JST オフセット済み Date から UTC 値で年月日・曜日を取り出す
+  const year  = jst.getUTCFullYear();
+  const month = jst.getUTCMonth() + 1;
+  const day   = jst.getUTCDate();
+  const dow   = DOW[jst.getUTCDay()];
+  return year + '年' + month + '月' + day + '日（' + dow + '）';
 }
 
 // -----------------------------------------------
@@ -1276,8 +1299,8 @@ function groupRecordsByDate(records) {
   const map = {};
 
   records.forEach(rec => {
-    // UTC日付を YYYY-MM-DD キーに変換
-    const dateKey = rec.started_at ? rec.started_at.slice(0, 10) : 'unknown';
+    // JST 日付を YYYY-MM-DD キーに変換（UTC の slice は使わない）
+    const dateKey = isoToJstDateKey(rec.started_at);
 
     if (!map[dateKey]) {
       map[dateKey] = {
