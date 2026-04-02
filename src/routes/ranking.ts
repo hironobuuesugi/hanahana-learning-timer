@@ -32,7 +32,7 @@
 //   - 全ユーザーの study_sessions (status='finished', subject IS NOT NULL) を対象
 //   - JST (UTC+9) 基準で週・月の範囲を判定
 //   - 同率同位（例: 2名が1位なら次は3位）
-//   - 表示するユーザー名は user_id をそのまま使用
+//   - 表示するユーザー名は display_name を使用（未設定時は user_id にフォールバック）
 // =============================================
 
 import { Hono } from 'hono'
@@ -92,17 +92,17 @@ function formatWeekLabel(monday: Date, sunday: Date): string {
 
 // ─────────────────────────────────────────────────
 // 同率順位を付与するヘルパー
-// input: [{user_id, seconds}, ...] (seconds 降順ソート済み)
-// output: [{rank, user_id, seconds}, ...]
+// input: [{display_name, seconds}, ...] (seconds 降順ソート済み)
+// output: [{rank, display_name, seconds}, ...]
 // ─────────────────────────────────────────────────
-function assignRanks(rows: { user_id: string; seconds: number }[]) {
-  const result: { rank: number; user_id: string; seconds: number }[] = [];
+function assignRanks(rows: { display_name: string; seconds: number }[]) {
+  const result: { rank: number; display_name: string; seconds: number }[] = [];
   let rank = 1;
   for (let i = 0; i < rows.length; i++) {
     if (i > 0 && rows[i].seconds < rows[i - 1].seconds) {
       rank = i + 1;
     }
-    result.push({ rank, user_id: rows[i].user_id, seconds: rows[i].seconds });
+    result.push({ rank, display_name: rows[i].display_name, seconds: rows[i].seconds });
   }
   return result;
 }
@@ -120,10 +120,11 @@ ranking.get('/', async (c) => {
   // 今週のランキング集計（全ユーザー）
   // 月曜 00:00 JST 〜 日曜 23:59 JST
   // date(started_at, '+9 hours') で JST 日付に変換
-  // study_sessions.user_id は users.id (INTEGER) なので JOIN して表示名を取得
+  // 表示名: COALESCE(u.display_name, u.user_id) でフォールバック付き
   // ─────────────────────────────────────────
   const weekAllRows = await db.prepare(`
-    SELECT u.user_id AS user_id, COALESCE(SUM(ss.total_seconds), 0) AS seconds
+    SELECT COALESCE(u.display_name, u.user_id) AS display_name,
+           COALESCE(SUM(ss.total_seconds), 0) AS seconds
     FROM study_sessions ss
     JOIN users u ON u.id = ss.user_id
     WHERE ss.status  = 'finished'
@@ -132,22 +133,22 @@ ranking.get('/', async (c) => {
       AND date(ss.started_at, '+9 hours') <= ?
     GROUP BY ss.user_id
     ORDER BY seconds DESC
-  `).bind(mondayStr, sundayStr).all<{ user_id: string; seconds: number }>();
+  `).bind(mondayStr, sundayStr).all<{ display_name: string; seconds: number }>();
 
   const weekAll = weekAllRows.results ?? [];
 
-  // ログインユーザーの文字列user_idを取得
+  // ログインユーザーの表示名を取得（自分の順位判定用）
   const myUserInfo = await db.prepare(
-    'SELECT user_id FROM users WHERE id = ?'
-  ).bind(userId).first<{ user_id: string }>();
-  const myUserStrId = myUserInfo?.user_id ?? '';
+    'SELECT COALESCE(display_name, user_id) AS display_name FROM users WHERE id = ?'
+  ).bind(userId).first<{ display_name: string }>();
+  const myDisplayName = myUserInfo?.display_name ?? '';
 
   // 今週の上位5名（同率で5位を超えた場合は同率を含める）
   const weekRanked = assignRanks(weekAll);
   const weekTop5 = getTop5WithTies(weekRanked);
 
   // 自分の今週順位と秒数
-  const myWeekEntry = weekRanked.find(r => r.user_id === myUserStrId);
+  const myWeekEntry = weekRanked.find(r => r.display_name === myDisplayName);
   const myWeekRank = myWeekEntry?.rank ?? null;
   const myWeekSeconds = myWeekEntry?.seconds ?? 0;
 
@@ -155,9 +156,11 @@ ranking.get('/', async (c) => {
   // 今月のランキング集計（全ユーザー）
   // 1日 00:00 JST 〜 末日 23:59 JST
   // strftime('%Y-%m', started_at, '+9 hours') で JST 年月に変換
+  // 表示名: COALESCE(u.display_name, u.user_id) でフォールバック付き
   // ─────────────────────────────────────────
   const monthAllRows = await db.prepare(`
-    SELECT u.user_id AS user_id, COALESCE(SUM(ss.total_seconds), 0) AS seconds
+    SELECT COALESCE(u.display_name, u.user_id) AS display_name,
+           COALESCE(SUM(ss.total_seconds), 0) AS seconds
     FROM study_sessions ss
     JOIN users u ON u.id = ss.user_id
     WHERE ss.status  = 'finished'
@@ -165,7 +168,7 @@ ranking.get('/', async (c) => {
       AND strftime('%Y-%m', ss.started_at, '+9 hours') = ?
     GROUP BY ss.user_id
     ORDER BY seconds DESC
-  `).bind(monthStr).all<{ user_id: string; seconds: number }>();
+  `).bind(monthStr).all<{ display_name: string; seconds: number }>();
 
   const monthAll = monthAllRows.results ?? [];
 
@@ -174,7 +177,7 @@ ranking.get('/', async (c) => {
   const monthTop5 = getTop5WithTies(monthRanked);
 
   // 自分の今月順位と秒数
-  const myMonthEntry = monthRanked.find(r => r.user_id === myUserStrId);
+  const myMonthEntry = monthRanked.find(r => r.display_name === myDisplayName);
   const myMonthRank = myMonthEntry?.rank ?? null;
   const myMonthSeconds = myMonthEntry?.seconds ?? 0;
 
@@ -202,7 +205,7 @@ ranking.get('/', async (c) => {
 // 例: 1,1,3,4,5,5 → 全員返す（5位が複数いる場合も含める）
 // 例: 1,2,3,4,5,6 → 1〜5のみ
 // ─────────────────────────────────────────────────
-function getTop5WithTies(ranked: { rank: number; user_id: string; seconds: number }[]) {
+function getTop5WithTies(ranked: { rank: number; display_name: string; seconds: number }[]) {
   return ranked.filter(r => r.rank <= 5);
 }
 

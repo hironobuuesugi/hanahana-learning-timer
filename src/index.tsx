@@ -652,10 +652,29 @@ app.get('*', (c) => {
           <div id="ranking-month-myrank-area" class="hidden mt-3 pt-3 border-t border-dashed border-gray-200">
             <p class="text-xs text-gray-500 text-center" id="ranking-month-myrank-text"></p>
           </div>
-          <!-- 月特典注記 -->
-          <p class="text-xs text-gray-400 mt-3 pt-3 border-t border-gray-100 text-center">
-            ※ 月20時間以上の生徒の中で、上位3名が特典対象
-          </p>
+          <!-- 月特典カード -->
+          <div class="mt-4 pt-3 border-t border-gray-100">
+            <div class="bg-amber-50 border border-amber-200 rounded-xl p-3">
+              <p class="text-xs font-bold text-amber-700 mb-2 text-center">🎁 月20時間以上で特典対象</p>
+              <div class="space-y-1">
+                <div class="flex items-center gap-2 text-sm">
+                  <span class="text-base">🏆</span>
+                  <span class="font-bold text-yellow-600">1位</span>
+                  <span class="text-gray-700">図書カード1000円</span>
+                </div>
+                <div class="flex items-center gap-2 text-sm">
+                  <span class="text-base">🥈</span>
+                  <span class="font-bold text-gray-500">2位</span>
+                  <span class="text-gray-700">図書カード500円</span>
+                </div>
+                <div class="flex items-center gap-2 text-sm">
+                  <span class="text-base">🍨</span>
+                  <span class="font-bold text-amber-700">3位</span>
+                  <span class="text-gray-700">ハーゲンダッツ</span>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1326,15 +1345,16 @@ function getRankBadgeClass(rank) {
 }
 
 // ランキング行HTMLを生成
-function buildRankRow(entry, myUserId) {
-  var isMe = (entry.user_id === myUserId);
+// entry.display_name に表示名を使用（ログインIDは表示しない）
+function buildRankRow(entry, myDisplayName) {
+  var isMe = (entry.display_name === myDisplayName);
   var badgeClass = getRankBadgeClass(entry.rank);
   var rowBg = isMe ? 'bg-pink-50 border border-pink-200' : 'bg-gray-50';
   var nameLabel = isMe ? '<span class="text-xs text-pink-500 font-bold ml-1">（あなた）</span>' : '';
   return (
     '<div class="flex items-center gap-3 rounded-xl px-3 py-2 ' + rowBg + '">' +
       '<span class="flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ' + badgeClass + '">' + entry.rank + '</span>' +
-      '<span class="flex-1 text-sm text-gray-700 truncate">' + escapeHtml(entry.user_id) + nameLabel + '</span>' +
+      '<span class="flex-1 text-sm text-gray-700 truncate">' + escapeHtml(entry.display_name) + nameLabel + '</span>' +
       '<span class="text-sm font-bold text-gray-600">' + formatSecondsRanking(entry.seconds) + '</span>' +
     '</div>'
   );
@@ -1379,7 +1399,8 @@ async function initRankingPage() {
     }
 
     var data = json.data;
-    var myId = currentUser ? currentUser.user_id : '';
+    // 表示名（display_name）で自分を判定する—ログインIDは一切使わない
+    var myDisplayName = currentUser ? (currentUser.display_name || currentUser.user_id) : '';
     var weekData  = data.week;
     var monthData = data.month;
 
@@ -1398,7 +1419,7 @@ async function initRankingPage() {
       myrankArea:  document.getElementById('ranking-week-myrank-area'),
       myrankText:  document.getElementById('ranking-week-myrank-text'),
       data:        weekData,
-      myId:        myId,
+      myId:        myDisplayName,
       periodType:  'week',
     });
 
@@ -1410,7 +1431,7 @@ async function initRankingPage() {
       myrankArea:  document.getElementById('ranking-month-myrank-area'),
       myrankText:  document.getElementById('ranking-month-myrank-text'),
       data:        monthData,
-      myId:        myId,
+      myId:        myDisplayName,
       periodType:  'month',
     });
 
@@ -1447,7 +1468,8 @@ function renderRankingSection(opts) {
   }
 
   // 自分の順位（トップ5圏外の場合だけ下部に表示）
-  var myInTop5 = data.ranking.some(function(r) { return r.user_id === myId; });
+  // display_name で比較（ログインIDは使わない）
+  var myInTop5 = data.ranking.some(function(r) { return r.display_name === myId; });
   if (!myInTop5 && data.my_rank !== null && data.my_seconds > 0) {
     // 圏外だが記録あり
     if (myrankText) {
