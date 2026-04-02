@@ -507,14 +507,32 @@ app.get('*', (c) => {
             <p class="text-xs text-gray-400 mt-1">準備中...</p>
           </div>
 
-          <!-- カレンダー（準備中） -->
-          <div class="card p-4 opacity-60 cursor-not-allowed">
-            <div class="text-3xl mb-2">📅</div>
-            <p class="font-medium text-gray-700 text-sm">カレンダー</p>
-            <p class="text-xs text-gray-400 mt-1">準備中...</p>
+          <!-- スタートダッシュガチャ（使用可能） -->
+          <div
+            class="card p-4 cursor-pointer hover:shadow-md transition-shadow border-2 border-yellow-100 hover:border-yellow-300"
+            onclick="drawGacha()"
+          >
+            <div class="text-3xl mb-2">🎰</div>
+            <p class="font-medium text-gray-700 text-sm">スタートダッシュガチャ</p>
+            <p class="text-xs text-yellow-500 mt-1 font-medium">最初の1つを引く→</p>
           </div>
 
         </div>
+
+        <!-- ガチャ結果表示エリア（ガチャを引いたときだけ表示） -->
+        <div id="gacha-result-area" class="hidden mt-4">
+          <div class="bg-gradient-to-br from-yellow-50 to-orange-50 border-2 border-yellow-200 rounded-2xl p-5">
+            <p class="text-xs font-medium text-yellow-600 mb-3 text-center tracking-wide">✨ 最初の1つを決めよう ✨</p>
+            <p class="text-base font-bold text-gray-800 leading-relaxed text-center" id="gacha-result-text"></p>
+            <div class="mt-4 text-center">
+              <button
+                onclick="drawGacha()"
+                class="bg-yellow-400 hover:bg-yellow-500 text-white text-sm font-bold px-6 py-2 rounded-full transition-colors shadow-sm"
+              >もう一度引く 🎰</button>
+            </div>
+          </div>
+        </div>
+
       </div>
 
       <!-- アカウント情報 -->
@@ -1153,6 +1171,48 @@ async function fetchAndRenderStats() {
     // ネットワークエラーは集計欄を "--" のまま無視（既存機能に影響しない）
     console.warn('Stats fetch error:', e);
   }
+}
+
+// =============================================
+// スタートダッシュガチャ
+// =============================================
+
+var GACHA_ITEMS = [
+  '日本語の意味を確認してから英単語10個を3回ずつ書く',
+  '日本語の意味を確認してから英単語10個を声に出して5回読む（読み方がわからないものは調べる）',
+  '英語の教科書の本文を3回音読する',
+  '英語の教科書の本文を1ページ分、2回書く',
+  'ジョイフルワークを2ページ進める',
+  '数学の問題集を2ページ進める、または教科書の章末問題を1ページやる',
+  '数学の授業ノートを3ページ見直し、わからない部分をピックアップして復習、またはひろ先生に質問する',
+  '塾のワーク・問題集・授業ノートを見返して、間違えた問題を5問やり直す',
+  '数学の教科書を2ページ予習する',
+  '数学の教科書で学校で習ったページを復習する',
+  '完全学習を2ページ進める',
+  '理科の重要語句10個を意味を確認しながら3回ずつ確認する',
+  '理科の教科書を3ページ音読する',
+  '理科の授業ノートまたはプリントを3ページ分見直す',
+  '理科の重要語句10個を声に出して5回読む',
+  '社会の教科書の太字10個を意味を確認しながら3回ずつ書く',
+  '社会の教科書を3ページ音読する',
+  '社会の授業ノートまたはプリントを3ページ分見直す',
+  '社会の教科書の太字10個を声に出して5回読む',
+  '国語の学習の2ページ分の熟語を3回ずつ書く（読みも確認する）',
+  '国語の教科書の文章を1つ音読する',
+  '国語の学習を2ページ進める',
+  '英単語帳を5分だけ眺める（意味とスペルを確認する）',
+];
+
+// ガチャを引いて結果を表示する
+function drawGacha() {
+  var idx        = Math.floor(Math.random() * GACHA_ITEMS.length);
+  var result     = GACHA_ITEMS[idx];
+  var areaEl     = document.getElementById('gacha-result-area');
+  var resultEl   = document.getElementById('gacha-result-text');
+  if (resultEl)  resultEl.textContent = result;
+  if (areaEl)    areaEl.classList.remove('hidden');
+  // スムーズにスクロールして結果を見せる
+  if (areaEl)    areaEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 // =============================================
