@@ -164,4 +164,84 @@ stats.get('/', async (c) => {
   });
 });
 
+// =============================================
+// GET /api/stats/subjects - 今月の教科別勉強時間集計
+//
+// レスポンス:
+//   {
+//     success: true,
+//     data: {
+//       english:  number,  // 英語（秒）
+//       math:     number,  // 数学（秒）
+//       japanese: number,  // 国語（秒）
+//       science:  number,  // 理科（秒）
+//       social:   number,  // 社会（秒）
+//       other:    number,  // その他（秒）
+//     }
+//   }
+//
+// 計算ルール:
+//   - 対象: status='finished' かつ subject IS NOT NULL
+//   - 期間: JST 今月 (strftime('%Y-%m', started_at, '+9 hours') = 今月YYYY-MM)
+//   - 複数教科選択時は total_seconds を教科数で均等配分（秒単位）
+//   - 配分は浮動小数で合計し、最終的に Math.floor で整数秒に変換
+// =============================================
+stats.get('/subjects', async (c) => {
+  const userId = c.get('userId');
+  const db = c.env.DB;
+
+  // JST 今月を取得（既存の getJstDateInfo() と同じロジック）
+  const now = new Date();
+  const jstNow = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+  const monthStr = jstNow.toISOString().slice(0, 7); // YYYY-MM
+
+  // 今月の全セッション（subject カラムを含む）を取得
+  const rows = await db.prepare(`
+    SELECT total_seconds, subject
+    FROM study_sessions
+    WHERE user_id = ?
+      AND status  = 'finished'
+      AND subject IS NOT NULL
+      AND strftime('%Y-%m', started_at, '+9 hours') = ?
+  `).bind(userId, monthStr).all<{ total_seconds: number; subject: string }>();
+
+  // 教科別秒数アキュムレータ（浮動小数で正確に積算）
+  const acc: Record<string, number> = {
+    english:  0,
+    math:     0,
+    japanese: 0,
+    science:  0,
+    social:   0,
+    other:    0,
+  };
+  const KNOWN_SUBJECTS = Object.keys(acc);
+
+  for (const row of rows.results ?? []) {
+    // subject は "english,math,social" のようなカンマ区切り文字列
+    const codes = row.subject.split(',').map((s: string) => s.trim()).filter(Boolean);
+    if (codes.length === 0) continue;
+
+    // 均等配分: total_seconds ÷ 教科数
+    const share = row.total_seconds / codes.length;
+
+    for (const code of codes) {
+      // 既知教科はそのまま、未知コードは other に合算
+      const key = KNOWN_SUBJECTS.includes(code) ? code : 'other';
+      acc[key] += share;
+    }
+  }
+
+  return c.json({
+    success: true,
+    data: {
+      english:  Math.floor(acc.english),
+      math:     Math.floor(acc.math),
+      japanese: Math.floor(acc.japanese),
+      science:  Math.floor(acc.science),
+      social:   Math.floor(acc.social),
+      other:    Math.floor(acc.other),
+    },
+  });
+});
+
 export default stats;

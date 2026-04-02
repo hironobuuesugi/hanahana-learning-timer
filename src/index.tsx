@@ -724,6 +724,19 @@ app.get('*', (c) => {
       <!-- エラーメッセージ -->
       <div id="records-error" class="hidden bg-red-50 border border-red-200 rounded-lg p-3 mb-4 text-sm text-red-600"></div>
 
+      <!-- 今月の教科別勉強時間カード -->
+      <div id="subject-stats-card" class="hidden mb-5">
+        <div class="bg-white rounded-2xl shadow-sm p-4">
+          <div class="flex items-center gap-2 mb-3">
+            <span class="text-lg">📊</span>
+            <h2 class="font-bold text-gray-700 text-sm">今月の教科別勉強時間</h2>
+          </div>
+          <div id="subject-stats-list" class="space-y-2">
+            <!-- JS で描画 -->
+          </div>
+        </div>
+      </div>
+
       <!-- 記録なし -->
       <div id="records-empty" class="hidden text-center py-16">
         <div class="text-5xl mb-4">📚</div>
@@ -1776,6 +1789,71 @@ function escapeHtml(str) {
 }
 
 // 勉強記録ページの初期化（ホーム画面から遷移してきた時）
+// =============================================
+// 今月の教科別勉強時間表示
+// =============================================
+
+// 教科コードの表示順と日本語ラベル
+const SUBJECT_ORDER = [
+  { code: 'english',  label: '英語' },
+  { code: 'math',     label: '数学' },
+  { code: 'japanese', label: '国語' },
+  { code: 'science',  label: '理科' },
+  { code: 'social',   label: '社会' },
+  { code: 'other',    label: 'その他' },
+];
+
+// 秒数を「X時間Y分」または「Y分」形式にフォーマット（0秒は「0分」）
+function formatSecondsSubject(seconds) {
+  var s = Math.floor(seconds);
+  var h = Math.floor(s / 3600);
+  var m = Math.floor((s % 3600) / 60);
+  if (h === 0 && m === 0) return '0分';
+  if (h === 0) return m + '分';
+  if (m === 0) return h + '時間';
+  return h + '時間' + m + '分';
+}
+
+// 教科別勉強時間カードを描画する
+// data: { english, math, japanese, science, social, other } (各秒数)
+function renderSubjectStats(data) {
+  var cardEl = document.getElementById('subject-stats-card');
+  var listEl = document.getElementById('subject-stats-list');
+  if (!cardEl || !listEl) return;
+
+  var rows = SUBJECT_ORDER.map(function(s) {
+    var sec = data[s.code] || 0;
+    var timeStr = formatSecondsSubject(sec);
+    // 記録がある教科はテキストを少し濃く
+    var valueColor = sec > 0 ? 'text-purple-600 font-bold' : 'text-gray-400';
+    return (
+      '<div class="flex items-center justify-between py-1 border-b border-gray-50 last:border-0">' +
+        '<span class="text-sm text-gray-600">' + s.label + '</span>' +
+        '<span class="text-sm ' + valueColor + '">' + timeStr + '</span>' +
+      '</div>'
+    );
+  }).join('');
+
+  listEl.innerHTML = rows;
+  cardEl.classList.remove('hidden');
+}
+
+// 今月教科別勉強時間を API から取得して描画する
+async function fetchAndRenderSubjectStats() {
+  var cardEl = document.getElementById('subject-stats-card');
+  if (cardEl) cardEl.classList.add('hidden');
+
+  try {
+    var res  = await fetch('/api/stats/subjects', { credentials: 'include' });
+    var json = await res.json();
+    if (json.success && json.data) {
+      renderSubjectStats(json.data);
+    }
+  } catch (e) {
+    // 教科別集計の取得失敗は静かに無視（記録一覧は引き続き表示）
+  }
+}
+
 async function initRecordsPage() {
   const loadingEl = document.getElementById('records-loading');
   const errorEl   = document.getElementById('records-error');
@@ -1787,6 +1865,12 @@ async function initRecordsPage() {
   errorEl.classList.add('hidden');
   emptyEl.classList.add('hidden');
   listEl.innerHTML = '';
+  // 教科別カードも非表示にリセット
+  var subjectCard = document.getElementById('subject-stats-card');
+  if (subjectCard) subjectCard.classList.add('hidden');
+
+  // 教科別集計と記録一覧を並行して取得
+  fetchAndRenderSubjectStats();
 
   try {
     const res  = await fetch('/api/records');
