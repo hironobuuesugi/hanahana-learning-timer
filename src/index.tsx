@@ -11,6 +11,7 @@ import timerRoutes from './routes/timer'
 import statsRoutes from './routes/stats'
 import recordsRoutes from './routes/records'
 import testdateRoutes from './routes/testdate'
+import rankingRoutes from './routes/ranking'
 import { authMiddleware } from './middleware/auth'
 import type { Bindings, Variables } from './types'
 
@@ -36,6 +37,7 @@ app.route('/api/timer', timerRoutes)
 app.route('/api/stats', statsRoutes)
 app.route('/api/records', recordsRoutes)
 app.route('/api/testdate', testdateRoutes)
+app.route('/api/ranking', rankingRoutes)
 
 // =============================================
 // フロントエンドページ（SPA形式）
@@ -500,11 +502,14 @@ app.get('*', (c) => {
             <p class="text-xs text-purple-400 mt-1 font-medium">記録を見る→</p>
           </div>
 
-          <!-- ランキング（準備中） -->
-          <div class="card p-4 opacity-60 cursor-not-allowed">
+          <!-- ランキング（使用可能） -->
+          <div
+            class="card p-4 cursor-pointer hover:shadow-md transition-shadow border-2 border-yellow-100 hover:border-yellow-300"
+            onclick="showPage('page-ranking'); initRankingPage()"
+          >
             <div class="text-3xl mb-2">🏆</div>
             <p class="font-medium text-gray-700 text-sm">ランキング</p>
-            <p class="text-xs text-gray-400 mt-1">準備中...</p>
+            <p class="text-xs text-yellow-500 mt-1 font-medium">順位を見る→</p>
           </div>
 
           <!-- スタートダッシュガチャ（使用可能） -->
@@ -577,6 +582,88 @@ app.get('*', (c) => {
           <i class="fas fa-sign-out-alt"></i>
           ログアウト
         </button>
+      </div>
+
+    </main>
+  </div>
+</div>
+
+<!-- =============================================
+     ページ6: ランキング画面
+     ============================================= -->
+<div id="page-ranking" class="page">
+  <div class="min-h-screen bg-gray-50">
+
+    <!-- ヘッダー -->
+    <header class="bg-white shadow-sm sticky top-0 z-10">
+      <div class="max-w-lg mx-auto px-4 py-3 flex items-center justify-between">
+        <button
+          onclick="showPage('page-home')"
+          class="text-gray-500 hover:text-gray-700 flex items-center gap-1 transition-colors"
+        >
+          <i class="fas fa-chevron-left"></i>
+          <span class="text-sm">ホーム</span>
+        </button>
+        <span class="font-bold text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-orange-400 text-sm">
+          🏆 ランキング
+        </span>
+        <div class="w-16"></div>
+      </div>
+    </header>
+
+    <!-- メインコンテンツ -->
+    <main class="max-w-lg mx-auto px-4 py-6 space-y-5">
+
+      <!-- ローディング中 -->
+      <div id="ranking-loading" class="text-center py-12 hidden">
+        <div class="inline-block w-8 h-8 border-4 border-yellow-200 border-t-yellow-400 rounded-full animate-spin mb-3"></div>
+        <p class="text-sm text-gray-400">集計中...</p>
+      </div>
+
+      <!-- エラーメッセージ -->
+      <div id="ranking-error" class="hidden bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-600"></div>
+
+      <!-- 今週のランキング -->
+      <div id="ranking-week-section" class="hidden">
+        <div class="bg-white rounded-2xl shadow-sm p-4">
+          <div class="flex items-center gap-2 mb-1">
+            <span class="text-lg">📅</span>
+            <h2 class="font-bold text-gray-700 text-sm">今週のランキング</h2>
+          </div>
+          <p class="text-xs text-gray-400 mb-3" id="ranking-week-label"></p>
+          <div id="ranking-week-list" class="space-y-2"></div>
+          <!-- 自分の順位（圏外の場合） -->
+          <div id="ranking-week-myrank-area" class="hidden mt-3 pt-3 border-t border-dashed border-gray-200">
+            <p class="text-xs text-gray-500 text-center" id="ranking-week-myrank-text"></p>
+          </div>
+        </div>
+      </div>
+
+      <!-- 今月のランキング -->
+      <div id="ranking-month-section" class="hidden">
+        <div class="bg-white rounded-2xl shadow-sm p-4">
+          <div class="flex items-center gap-2 mb-1">
+            <span class="text-lg">🗓️</span>
+            <h2 class="font-bold text-gray-700 text-sm">今月のランキング</h2>
+          </div>
+          <p class="text-xs text-gray-400 mb-3" id="ranking-month-label"></p>
+          <div id="ranking-month-list" class="space-y-2"></div>
+          <!-- 自分の順位（圏外の場合） -->
+          <div id="ranking-month-myrank-area" class="hidden mt-3 pt-3 border-t border-dashed border-gray-200">
+            <p class="text-xs text-gray-500 text-center" id="ranking-month-myrank-text"></p>
+          </div>
+          <!-- 月特典注記 -->
+          <p class="text-xs text-gray-400 mt-3 pt-3 border-t border-gray-100 text-center">
+            ※ 月20時間以上の生徒の中で、上位3名が特典対象
+          </p>
+        </div>
+      </div>
+
+      <!-- 記録なし -->
+      <div id="ranking-empty" class="hidden text-center py-16">
+        <div class="text-5xl mb-4">🏅</div>
+        <p class="text-gray-500 text-sm">まだランキングデータがありません</p>
+        <p class="text-gray-400 text-xs mt-2">勉強を記録するとランキングに表示されます！</p>
       </div>
 
     </main>
@@ -1213,6 +1300,172 @@ function drawGacha() {
   if (areaEl)    areaEl.classList.remove('hidden');
   // スムーズにスクロールして結果を見せる
   if (areaEl)    areaEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+// =============================================
+// ランキング機能
+// =============================================
+
+// 秒数を「X時間Y分」形式にフォーマット（秒は表示しない）
+function formatSecondsRanking(seconds) {
+  var s = Math.floor(seconds);
+  var h = Math.floor(s / 3600);
+  var m = Math.floor((s % 3600) / 60);
+  if (h === 0 && m === 0) return '0分';
+  if (h === 0) return m + '分';
+  if (m === 0) return h + '時間';
+  return h + '時間' + m + '分';
+}
+
+// 順位バッジの色
+function getRankBadgeClass(rank) {
+  if (rank === 1) return 'bg-yellow-400 text-white';
+  if (rank === 2) return 'bg-gray-300 text-gray-700';
+  if (rank === 3) return 'bg-amber-600 text-white';
+  return 'bg-gray-100 text-gray-500';
+}
+
+// ランキング行HTMLを生成
+function buildRankRow(entry, myUserId) {
+  var isMe = (entry.user_id === myUserId);
+  var badgeClass = getRankBadgeClass(entry.rank);
+  var rowBg = isMe ? 'bg-pink-50 border border-pink-200' : 'bg-gray-50';
+  var nameLabel = isMe ? '<span class="text-xs text-pink-500 font-bold ml-1">（あなた）</span>' : '';
+  return (
+    '<div class="flex items-center gap-3 rounded-xl px-3 py-2 ' + rowBg + '">' +
+      '<span class="flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ' + badgeClass + '">' + entry.rank + '</span>' +
+      '<span class="flex-1 text-sm text-gray-700 truncate">' + escapeHtml(entry.user_id) + nameLabel + '</span>' +
+      '<span class="text-sm font-bold text-gray-600">' + formatSecondsRanking(entry.seconds) + '</span>' +
+    '</div>'
+  );
+}
+
+// HTML エスケープ
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+// ランキングページ初期化（ページ遷移時に呼ばれる）
+async function initRankingPage() {
+  // 表示をリセット
+  var loadingEl = document.getElementById('ranking-loading');
+  var errorEl   = document.getElementById('ranking-error');
+  var weekSec   = document.getElementById('ranking-week-section');
+  var monthSec  = document.getElementById('ranking-month-section');
+  var emptyEl   = document.getElementById('ranking-empty');
+
+  if (loadingEl) loadingEl.classList.remove('hidden');
+  if (errorEl)   errorEl.classList.add('hidden');
+  if (weekSec)   weekSec.classList.add('hidden');
+  if (monthSec)  monthSec.classList.add('hidden');
+  if (emptyEl)   emptyEl.classList.add('hidden');
+
+  try {
+    var res  = await fetch('/api/ranking', { credentials: 'include' });
+    var json = await res.json();
+
+    if (loadingEl) loadingEl.classList.add('hidden');
+
+    if (!json.success) {
+      if (errorEl) {
+        errorEl.textContent = json.error || 'ランキングの取得に失敗しました';
+        errorEl.classList.remove('hidden');
+      }
+      return;
+    }
+
+    var data = json.data;
+    var myId = currentUser ? currentUser.user_id : '';
+    var weekData  = data.week;
+    var monthData = data.month;
+
+    var hasAnyData = (weekData.ranking.length > 0 || monthData.ranking.length > 0);
+
+    if (!hasAnyData) {
+      if (emptyEl) emptyEl.classList.remove('hidden');
+      return;
+    }
+
+    // ─── 今週 ───
+    renderRankingSection({
+      sectionEl:   weekSec,
+      labelElId:   'ranking-week-label',
+      listElId:    'ranking-week-list',
+      myrankArea:  document.getElementById('ranking-week-myrank-area'),
+      myrankText:  document.getElementById('ranking-week-myrank-text'),
+      data:        weekData,
+      myId:        myId,
+      periodType:  'week',
+    });
+
+    // ─── 今月 ───
+    renderRankingSection({
+      sectionEl:   monthSec,
+      labelElId:   'ranking-month-label',
+      listElId:    'ranking-month-list',
+      myrankArea:  document.getElementById('ranking-month-myrank-area'),
+      myrankText:  document.getElementById('ranking-month-myrank-text'),
+      data:        monthData,
+      myId:        myId,
+      periodType:  'month',
+    });
+
+  } catch (e) {
+    if (loadingEl) loadingEl.classList.add('hidden');
+    if (errorEl) {
+      errorEl.textContent = '通信エラーが発生しました';
+      errorEl.classList.remove('hidden');
+    }
+  }
+}
+
+// ランキングセクション描画ヘルパー
+function renderRankingSection(opts) {
+  var sectionEl  = opts.sectionEl;
+  var labelEl    = document.getElementById(opts.labelElId);
+  var listEl     = document.getElementById(opts.listElId);
+  var myrankArea = opts.myrankArea;
+  var myrankText = opts.myrankText;
+  var data       = opts.data;
+  var myId       = opts.myId;
+
+  if (labelEl) labelEl.textContent = data.period_label;
+
+  // ランキング行を描画
+  if (listEl) {
+    if (data.ranking.length === 0) {
+      listEl.innerHTML = '<p class="text-xs text-gray-400 text-center py-3">まだデータがありません</p>';
+    } else {
+      listEl.innerHTML = data.ranking.map(function(entry) {
+        return buildRankRow(entry, myId);
+      }).join('');
+    }
+  }
+
+  // 自分の順位（トップ5圏外の場合だけ下部に表示）
+  var myInTop5 = data.ranking.some(function(r) { return r.user_id === myId; });
+  if (!myInTop5 && data.my_rank !== null && data.my_seconds > 0) {
+    // 圏外だが記録あり
+    if (myrankText) {
+      myrankText.textContent =
+        'あなたの順位: ' + data.my_rank + '位（' + formatSecondsRanking(data.my_seconds) + '）';
+    }
+    if (myrankArea) myrankArea.classList.remove('hidden');
+  } else if (!myInTop5 && data.my_seconds === 0) {
+    // 記録なし
+    if (myrankText) {
+      myrankText.textContent = 'あなたはまだ記録がありません';
+    }
+    if (myrankArea) myrankArea.classList.remove('hidden');
+  } else {
+    if (myrankArea) myrankArea.classList.add('hidden');
+  }
+
+  if (sectionEl) sectionEl.classList.remove('hidden');
 }
 
 // =============================================
