@@ -1702,10 +1702,8 @@ function groupRecordsByDate(records) {
       });
     }
 
-    // 勉強内容を追加（空除外）
-    if (rec.memo && rec.memo.trim()) {
-      g.memos.push(rec.memo.trim());
-    }
+    // 勉強内容を追加（空除外）。セッションIDと一緒に保持する
+    g.memos.push({ id: rec.id, text: rec.memo ? rec.memo.trim() : '' });
   });
 
   // dateKey の降順（新しい日が上）に並べて返す
@@ -1736,18 +1734,29 @@ function buildDayCard(group) {
       ).join(' ')
     : '<span style="font-size:0.75rem;color:#9ca3af;">-</span>';
 
-  // 勉強内容リスト（複数行を箇条書き風に）
+  // 勉強内容リスト（各セッションに編集ボタン付き）
   let memosHtml;
   if (group.memos.length === 0) {
     memosHtml = '<span style="color:#9ca3af;">-</span>';
-  } else if (group.memos.length === 1) {
-    memosHtml = '<span style="font-size:0.875rem;color:#4b5563;">' + escapeHtml(group.memos[0]) + '</span>';
   } else {
-    memosHtml = '<ul style="margin:0;padding-left:1.1rem;list-style:disc;">'
-      + group.memos.map(m =>
-          '<li style="font-size:0.875rem;color:#4b5563;line-height:1.7;">' + escapeHtml(m) + '</li>'
-        ).join('')
-      + '</ul>';
+    memosHtml = group.memos.map(function(m) {
+      var sid = m.id;
+      var txt = m.text || '';
+      return (
+        '<div id="memo-view-' + sid + '" style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:6px;">'
+        + '<span style="font-size:0.875rem;color:#4b5563;flex:1;white-space:pre-wrap;" id="memo-text-' + sid + '">' + escapeHtml(txt) + '</span>'
+        + '<button onclick="startEditMemo(' + sid + ')" style="font-size:0.7rem;color:#9ca3af;border:1px solid #e5e7eb;border-radius:6px;padding:2px 8px;background:#f9fafb;white-space:nowrap;cursor:pointer;">編集</button>'
+        + '</div>'
+        + '<div id="memo-edit-' + sid + '" style="display:none;margin-bottom:6px;">'
+        +   '<textarea id="memo-input-' + sid + '" rows="3" style="width:100%;font-size:0.875rem;border:1px solid #f9a8d4;border-radius:8px;padding:6px 8px;resize:vertical;box-sizing:border-box;">' + escapeHtml(txt) + '</textarea>'
+        +   '<div style="display:flex;gap:6px;margin-top:4px;">'
+        +     '<button onclick="saveMemo(' + sid + ')" style="font-size:0.75rem;background:#ec4899;color:#fff;border:none;border-radius:6px;padding:4px 14px;cursor:pointer;font-weight:600;">保存</button>'
+        +     '<button onclick="cancelEditMemo(' + sid + ')" style="font-size:0.75rem;background:#f3f4f6;color:#6b7280;border:1px solid #e5e7eb;border-radius:6px;padding:4px 10px;cursor:pointer;">キャンセル</button>'
+        +   '</div>'
+        +   '<p id="memo-err-' + sid + '" style="font-size:0.75rem;color:#ef4444;margin-top:4px;display:none;"></p>'
+        + '</div>'
+      );
+    }).join('');
   }
 
   return (
@@ -1769,9 +1778,12 @@ function buildDayCard(group) {
     + '</div>'
 
     // ── 勉強内容 ──
-    + '<div style="display:flex;align-items:flex-start;gap:8px;padding-top:10px;border-top:1px solid #f3f4f6;">'
-    +   '<i class="fas fa-pencil-alt" style="color:#d1d5db;font-size:0.875rem;margin-top:3px;flex-shrink:0;"></i>'
-    +   '<div style="flex:1;">' + memosHtml + '</div>'
+    + '<div style="padding-top:10px;border-top:1px solid #f3f4f6;">'
+    +   '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">'
+    +     '<i class="fas fa-pencil-alt" style="color:#d1d5db;font-size:0.875rem;"></i>'
+    +     '<span style="font-size:0.75rem;color:#9ca3af;font-weight:500;">勉強内容</span>'
+    +   '</div>'
+    +   '<div>' + memosHtml + '</div>'
     + '</div>'
 
     + '</div>'
@@ -1786,6 +1798,74 @@ function escapeHtml(str) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+// -----------------------------------------------
+// 勉強内容 インライン編集
+// -----------------------------------------------
+function startEditMemo(sid) {
+  var viewEl  = document.getElementById('memo-view-' + sid);
+  var editEl  = document.getElementById('memo-edit-' + sid);
+  var inputEl = document.getElementById('memo-input-' + sid);
+  var errEl   = document.getElementById('memo-err-' + sid);
+  if (!viewEl || !editEl || !inputEl) return;
+  // 現在表示中のテキストを textarea にセット
+  var textEl = document.getElementById('memo-text-' + sid);
+  if (textEl) inputEl.value = textEl.textContent || '';
+  viewEl.style.display = 'none';
+  editEl.style.display  = 'block';
+  if (errEl) errEl.style.display = 'none';
+  inputEl.focus();
+}
+
+function cancelEditMemo(sid) {
+  var viewEl = document.getElementById('memo-view-' + sid);
+  var editEl = document.getElementById('memo-edit-' + sid);
+  var errEl  = document.getElementById('memo-err-' + sid);
+  if (!viewEl || !editEl) return;
+  viewEl.style.display = 'flex';
+  editEl.style.display  = 'none';
+  if (errEl) errEl.style.display = 'none';
+}
+
+async function saveMemo(sid) {
+  var inputEl = document.getElementById('memo-input-' + sid);
+  var errEl   = document.getElementById('memo-err-' + sid);
+  var saveBtn = document.querySelector('#memo-edit-' + sid + ' button');
+  if (!inputEl) return;
+
+  var newMemo = inputEl.value.trim();
+  if (!newMemo) {
+    if (errEl) { errEl.textContent = '勉強内容を入力してください'; errEl.style.display = 'block'; }
+    return;
+  }
+  if (newMemo.length > 500) {
+    if (errEl) { errEl.textContent = '500文字以内にしてください'; errEl.style.display = 'block'; }
+    return;
+  }
+
+  if (saveBtn) saveBtn.disabled = true;
+  try {
+    var res  = await fetch('/api/records/' + sid, {
+      method: 'PATCH',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ memo: newMemo }),
+    });
+    var data = await res.json();
+    if (data.success) {
+      // 表示テキストを更新して編集モードを閉じる
+      var textEl = document.getElementById('memo-text-' + sid);
+      if (textEl) textEl.textContent = newMemo;
+      cancelEditMemo(sid);
+    } else {
+      if (errEl) { errEl.textContent = data.error || '更新に失敗しました'; errEl.style.display = 'block'; }
+    }
+  } catch (e) {
+    if (errEl) { errEl.textContent = '通信エラーが発生しました'; errEl.style.display = 'block'; }
+  } finally {
+    if (saveBtn) saveBtn.disabled = false;
+  }
 }
 
 // 勉強記録ページの初期化（ホーム画面から遷移してきた時）
