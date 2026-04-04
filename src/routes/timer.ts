@@ -116,7 +116,7 @@ timer.post('/start', async (c) => {
     const state = await buildTimerState(db, existing);
     return c.json({
       success: false,
-      error: 'すでに勉強中のセッションがあります',
+      error: 'すでに別のタイマーが動いています',
       data: state,
     }, 409);
   }
