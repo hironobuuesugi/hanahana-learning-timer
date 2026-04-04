@@ -684,6 +684,7 @@ app.get('*', (c) => {
           <div class="flex items-center gap-2 mb-1">
             <span class="text-lg">📋</span>
             <h2 class="font-bold text-gray-700 text-sm">先月のランキング</h2>
+            <span class="text-xs text-gray-400 bg-gray-100 rounded-full px-2 py-0.5">先月の確定順位</span>
           </div>
           <p class="text-xs text-gray-400 mb-3" id="ranking-lastmonth-label"></p>
           <div id="ranking-lastmonth-list" class="space-y-2"></div>
@@ -691,29 +692,7 @@ app.get('*', (c) => {
           <div id="ranking-lastmonth-myrank-area" class="hidden mt-3 pt-3 border-t border-dashed border-gray-200">
             <p class="text-xs text-gray-500 text-center" id="ranking-lastmonth-myrank-text"></p>
           </div>
-          <!-- 先月特典カード -->
-          <div class="mt-4 pt-3 border-t border-gray-100">
-            <div class="bg-amber-50 border border-amber-200 rounded-xl p-3">
-              <p class="text-xs font-bold text-amber-700 mb-2 text-center">🎁 月20時間以上で特典対象</p>
-              <div class="space-y-1">
-                <div class="flex items-center gap-2 text-sm">
-                  <span class="text-base">🏆</span>
-                  <span class="font-bold text-yellow-600">1位</span>
-                  <span class="text-gray-700">図書カード1000円</span>
-                </div>
-                <div class="flex items-center gap-2 text-sm">
-                  <span class="text-base">🥈</span>
-                  <span class="font-bold text-gray-500">2位</span>
-                  <span class="text-gray-700">図書カード500円</span>
-                </div>
-                <div class="flex items-center gap-2 text-sm">
-                  <span class="text-base">🍨</span>
-                  <span class="font-bold text-amber-700">3位</span>
-                  <span class="text-gray-700">ハーゲンダッツ</span>
-                </div>
-              </div>
-            </div>
-          </div>
+          <!-- 先月特典カード: 意図的に削除（今月ランキングのみ表示） -->
         </div>
       </div>
 
