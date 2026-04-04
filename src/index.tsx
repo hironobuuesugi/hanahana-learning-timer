@@ -450,9 +450,9 @@ app.get('*', (c) => {
         </h3>
         <!-- 保存済みテスト日の表示 -->
         <div id="testdate-display" class="mb-3 hidden">
-          <div class="flex items-center gap-3">
-            <p class="text-2xl font-bold text-orange-500" id="testdate-value">--</p>
-            <p class="text-sm font-medium text-orange-400 bg-orange-50 px-2 py-1 rounded-lg" id="testdate-countdown"></p>
+          <div class="text-center py-1">
+            <p class="text-3xl font-bold text-orange-500 mb-1" id="testdate-countdown"></p>
+            <p class="text-sm font-medium text-orange-400" id="testdate-value">--</p>
           </div>
         </div>
         <!-- 入力フォーム -->
@@ -1526,10 +1526,10 @@ function calcDaysUntilTest(dateStr) {
   return diffDays;
 }
 
-// 日数差を「あと◯日」テキストに変換
+// 日数差を「🔥 あと◯日」テキストに変換
 function formatCountdown(days) {
-  if (days < 0)  return '終了';
-  return 'あと' + days + '日';
+  if (days < 0)  return '⏰ 終了';
+  return '🔥 あと' + days + '日';
 }
 
 // テスト日の表示エリアを更新する共通関数
@@ -1538,7 +1538,7 @@ function renderTestDateDisplay(dateVal) {
   var valueEl      = document.getElementById('testdate-value');
   var countdownEl  = document.getElementById('testdate-countdown');
   if (dateVal && displayEl && valueEl && countdownEl) {
-    valueEl.textContent     = formatTestDateShort(dateVal);
+    valueEl.textContent     = 'テスト日 ' + formatTestDateShort(dateVal);
     countdownEl.textContent = formatCountdown(calcDaysUntilTest(dateVal));
     displayEl.classList.remove('hidden');
   } else if (displayEl) {
