@@ -407,12 +407,12 @@ app.get('*', (c) => {
           <i class="fas fa-chart-bar text-pink-400"></i>
           勉強時間
         </h3>
-        <div class="grid grid-cols-2 gap-3" id="home-stats-grid">
-          <!-- 今日 -->
-          <div class="bg-pink-50 rounded-xl p-3 text-center">
-            <p class="text-xs text-pink-400 font-medium mb-1">今日</p>
-            <p class="text-lg font-bold text-pink-600" id="home-stats-today">--</p>
-          </div>
+        <!-- 🔥 今日の勉強時間（強調表示） -->
+        <div class="bg-pink-50 border border-pink-200 rounded-xl p-4 mb-3 text-center">
+          <p class="text-sm text-pink-500 font-semibold mb-1">🔥 今日の勉強時間</p>
+          <p class="text-3xl font-bold text-pink-600" id="home-stats-today">--</p>
+        </div>
+        <div class="grid grid-cols-3 gap-3" id="home-stats-grid">
           <!-- 今週 -->
           <div class="bg-purple-50 rounded-xl p-3 text-center">
             <p class="text-xs text-purple-400 font-medium mb-1">今週</p>
