@@ -1780,7 +1780,7 @@ function buildDayCard(group) {
       return (
         '<div id="memo-view-' + sid + '" style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:6px;">'
         + '<span style="font-size:0.875rem;color:#4b5563;flex:1;white-space:pre-wrap;" id="memo-text-' + sid + '">' + escapeHtml(txt) + '</span>'
-        + '<button onclick="startEditMemo(' + sid + ')" style="font-size:0.7rem;color:#9ca3af;border:1px solid #e5e7eb;border-radius:6px;padding:2px 8px;background:#f9fafb;white-space:nowrap;cursor:pointer;">編集</button>'
+        + '<button onclick="startEditMemo(' + sid + ')" title="編集" style="font-size:1rem;color:#9ca3af;border:1px solid #e5e7eb;border-radius:6px;padding:2px 7px;background:#f9fafb;white-space:nowrap;cursor:pointer;line-height:1.4;">✏️</button>'
         + '</div>'
         + '<div id="memo-edit-' + sid + '" style="display:none;margin-bottom:6px;">'
         +   '<textarea id="memo-input-' + sid + '" rows="3" style="width:100%;font-size:0.875rem;border:1px solid #f9a8d4;border-radius:8px;padding:6px 8px;resize:vertical;box-sizing:border-box;">' + escapeHtml(txt) + '</textarea>'
