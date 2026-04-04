@@ -107,8 +107,39 @@ function assignRanks(rows: { display_name: string; seconds: number }[]) {
   return result;
 }
 
+// ─────────────────────────────────────────────────
+// 先月の期間 (YYYY-MM-DD) と表示ラベルを返すヘルパー
+// ─────────────────────────────────────────────────
+function getLastMonthPeriod() {
+  const now = new Date();
+  const jstOffset = 9 * 60 * 60 * 1000;
+  const jstNow = new Date(now.getTime() + jstOffset);
+
+  const year  = jstNow.getUTCFullYear();
+  const month = jstNow.getUTCMonth() + 1; // 1-12
+
+  // 先月の年・月
+  const lastYear  = month === 1 ? year - 1 : year;
+  const lastMonth = month === 1 ? 12 : month - 1;
+
+  // 先月1日
+  const firstDay = `${lastYear}-${String(lastMonth).padStart(2, '0')}-01`;
+
+  // 先月末日（当月1日の前日）
+  const lastDayDate = new Date(Date.UTC(year, month - 1, 0)); // UTC月は0始まり
+  const lastDay = lastDayDate.toISOString().slice(0, 10);
+
+  // YYYY-MM 形式（SQLのstrftime比較用）
+  const lastMonthStr = `${lastYear}-${String(lastMonth).padStart(2, '0')}`;
+
+  // 表示ラベル
+  const label = `${lastYear}年${lastMonth}月`;
+
+  return { firstDay, lastDay, lastMonthStr, label };
+}
+
 // =============================================
-// GET /api/ranking - 週・月ランキング
+// GET /api/ranking - 週・月・先月ランキング
 // =============================================
 ranking.get('/', async (c) => {
   const userId = c.get('userId');
@@ -181,6 +212,33 @@ ranking.get('/', async (c) => {
   const myMonthRank = myMonthEntry?.rank ?? null;
   const myMonthSeconds = myMonthEntry?.seconds ?? 0;
 
+  // ─────────────────────────────────────────
+  // 先月のランキング集計（TOP3＋同率）
+  // ─────────────────────────────────────────
+  const { firstDay, lastDay, lastMonthStr, label: lastMonthLabel } = getLastMonthPeriod();
+
+  const lastMonthAllRows = await db.prepare(`
+    SELECT COALESCE(u.display_name, u.user_id) AS display_name,
+           COALESCE(SUM(ss.total_seconds), 0) AS seconds
+    FROM study_sessions ss
+    JOIN users u ON u.id = ss.user_id
+    WHERE ss.status  = 'finished'
+      AND ss.subject IS NOT NULL
+      AND strftime('%Y-%m', ss.started_at, '+9 hours') = ?
+    GROUP BY ss.user_id
+    ORDER BY seconds DESC
+  `).bind(lastMonthStr).all<{ display_name: string; seconds: number }>();
+
+  const lastMonthAll    = lastMonthAllRows.results ?? [];
+  const lastMonthRanked = assignRanks(lastMonthAll);
+  // TOP3（同率3位は全員含める）
+  const lastMonthTop3   = lastMonthRanked.filter(r => r.rank <= 3);
+
+  // 自分の先月順位と秒数
+  const myLastMonthEntry   = lastMonthRanked.find(r => r.display_name === myDisplayName);
+  const myLastMonthRank    = myLastMonthEntry?.rank ?? null;
+  const myLastMonthSeconds = myLastMonthEntry?.seconds ?? 0;
+
   return c.json({
     success: true,
     data: {
@@ -195,6 +253,12 @@ ranking.get('/', async (c) => {
         ranking: monthTop5,
         my_rank: myMonthRank,
         my_seconds: myMonthSeconds,
+      },
+      last_month: {
+        period_label: lastMonthLabel,
+        ranking: lastMonthTop3,
+        my_rank: myLastMonthRank,
+        my_seconds: myLastMonthSeconds,
       },
     },
   });

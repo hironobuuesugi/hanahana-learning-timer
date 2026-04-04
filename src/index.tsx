@@ -678,6 +678,45 @@ app.get('*', (c) => {
         </div>
       </div>
 
+      <!-- 先月のランキング -->
+      <div id="ranking-lastmonth-section" class="hidden">
+        <div class="bg-white rounded-2xl shadow-sm p-4">
+          <div class="flex items-center gap-2 mb-1">
+            <span class="text-lg">📋</span>
+            <h2 class="font-bold text-gray-700 text-sm">先月のランキング</h2>
+          </div>
+          <p class="text-xs text-gray-400 mb-3" id="ranking-lastmonth-label"></p>
+          <div id="ranking-lastmonth-list" class="space-y-2"></div>
+          <!-- 自分の順位（圏外の場合） -->
+          <div id="ranking-lastmonth-myrank-area" class="hidden mt-3 pt-3 border-t border-dashed border-gray-200">
+            <p class="text-xs text-gray-500 text-center" id="ranking-lastmonth-myrank-text"></p>
+          </div>
+          <!-- 先月特典カード -->
+          <div class="mt-4 pt-3 border-t border-gray-100">
+            <div class="bg-amber-50 border border-amber-200 rounded-xl p-3">
+              <p class="text-xs font-bold text-amber-700 mb-2 text-center">🎁 月20時間以上で特典対象</p>
+              <div class="space-y-1">
+                <div class="flex items-center gap-2 text-sm">
+                  <span class="text-base">🏆</span>
+                  <span class="font-bold text-yellow-600">1位</span>
+                  <span class="text-gray-700">図書カード1000円</span>
+                </div>
+                <div class="flex items-center gap-2 text-sm">
+                  <span class="text-base">🥈</span>
+                  <span class="font-bold text-gray-500">2位</span>
+                  <span class="text-gray-700">図書カード500円</span>
+                </div>
+                <div class="flex items-center gap-2 text-sm">
+                  <span class="text-base">🍨</span>
+                  <span class="font-bold text-amber-700">3位</span>
+                  <span class="text-gray-700">ハーゲンダッツ</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- 記録なし -->
       <div id="ranking-empty" class="hidden text-center py-16">
         <div class="text-5xl mb-4">🏅</div>
@@ -1387,15 +1426,17 @@ async function initRankingPage() {
   // 表示をリセット
   var loadingEl = document.getElementById('ranking-loading');
   var errorEl   = document.getElementById('ranking-error');
-  var weekSec   = document.getElementById('ranking-week-section');
-  var monthSec  = document.getElementById('ranking-month-section');
-  var emptyEl   = document.getElementById('ranking-empty');
+  var weekSec      = document.getElementById('ranking-week-section');
+  var monthSec     = document.getElementById('ranking-month-section');
+  var lastMonthSec = document.getElementById('ranking-lastmonth-section');
+  var emptyEl      = document.getElementById('ranking-empty');
 
-  if (loadingEl) loadingEl.classList.remove('hidden');
-  if (errorEl)   errorEl.classList.add('hidden');
-  if (weekSec)   weekSec.classList.add('hidden');
-  if (monthSec)  monthSec.classList.add('hidden');
-  if (emptyEl)   emptyEl.classList.add('hidden');
+  if (loadingEl)    loadingEl.classList.remove('hidden');
+  if (errorEl)      errorEl.classList.add('hidden');
+  if (weekSec)      weekSec.classList.add('hidden');
+  if (monthSec)     monthSec.classList.add('hidden');
+  if (lastMonthSec) lastMonthSec.classList.add('hidden');
+  if (emptyEl)      emptyEl.classList.add('hidden');
 
   try {
     var res  = await fetch('/api/ranking', { credentials: 'include' });
@@ -1414,10 +1455,11 @@ async function initRankingPage() {
     var data = json.data;
     // 表示名（display_name）で自分を判定する—ログインIDは一切使わない
     var myDisplayName = currentUser ? (currentUser.display_name || currentUser.user_id) : '';
-    var weekData  = data.week;
-    var monthData = data.month;
+    var weekData      = data.week;
+    var monthData     = data.month;
+    var lastMonthData = data.last_month;
 
-    var hasAnyData = (weekData.ranking.length > 0 || monthData.ranking.length > 0);
+    var hasAnyData = (weekData.ranking.length > 0 || monthData.ranking.length > 0 || lastMonthData.ranking.length > 0);
 
     if (!hasAnyData) {
       if (emptyEl) emptyEl.classList.remove('hidden');
@@ -1446,6 +1488,18 @@ async function initRankingPage() {
       data:        monthData,
       myId:        myDisplayName,
       periodType:  'month',
+    });
+
+    // ─── 先月 ───
+    renderRankingSection({
+      sectionEl:   lastMonthSec,
+      labelElId:   'ranking-lastmonth-label',
+      listElId:    'ranking-lastmonth-list',
+      myrankArea:  document.getElementById('ranking-lastmonth-myrank-area'),
+      myrankText:  document.getElementById('ranking-lastmonth-myrank-text'),
+      data:        lastMonthData,
+      myId:        myDisplayName,
+      periodType:  'last_month',
     });
 
   } catch (e) {
@@ -1480,17 +1534,19 @@ function renderRankingSection(opts) {
     }
   }
 
-  // 自分の順位（トップ5圏外の場合だけ下部に表示）
+  // 自分の順位表示
   // display_name で比較（ログインIDは使わない）
-  var myInTop5 = data.ranking.some(function(r) { return r.display_name === myId; });
-  if (!myInTop5 && data.my_rank !== null && data.my_seconds > 0) {
-    // 圏外だが記録あり
+  var myInTopList = data.ranking.some(function(r) { return r.display_name === myId; });
+  // 先月ランキングは「常に」自分の順位を下部表示（TOP3に入っていても補足として表示）
+  var isLastMonth = (opts.periodType === 'last_month');
+  if ((!myInTopList || isLastMonth) && data.my_rank !== null && data.my_seconds > 0) {
+    // 記録あり
     if (myrankText) {
       myrankText.textContent =
         'あなたの順位: ' + data.my_rank + '位（' + formatSecondsRanking(data.my_seconds) + '）';
     }
     if (myrankArea) myrankArea.classList.remove('hidden');
-  } else if (!myInTop5 && data.my_seconds === 0) {
+  } else if (!myInTopList && data.my_seconds === 0) {
     // 記録なし
     if (myrankText) {
       myrankText.textContent = 'あなたはまだ記録がありません';
