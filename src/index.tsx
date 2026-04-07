@@ -1988,7 +1988,7 @@ async function initRecordsPage() {
   fetchAndRenderSubjectStats();
 
   try {
-    const res  = await fetch('/api/records');
+    const res  = await fetch('/api/records', { credentials: 'include' });
     const json = await res.json();
 
     loadingEl.classList.add('hidden');

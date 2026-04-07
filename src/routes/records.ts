@@ -52,8 +52,7 @@ records.get('/', async (c) => {
       started_at,
       total_seconds,
       subject,
-      memo,
-      recorded_at
+      memo
     FROM study_sessions
     WHERE user_id    = ?
       AND status     = 'finished'
@@ -65,7 +64,6 @@ records.get('/', async (c) => {
     total_seconds: number
     subject: string
     memo: string | null
-    recorded_at: string | null
   }>()
 
   return c.json({
