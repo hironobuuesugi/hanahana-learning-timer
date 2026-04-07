@@ -81,6 +81,7 @@ export type StudySessionRecord = {
   started_at: string;        // ISO8601
   finished_at: string | null;
   total_seconds: number;
+  auto_stopped: number;      // 90分自動停止フラグ（1=自動停止）
   created_at: string;
   updated_at: string;
 }
@@ -101,6 +102,7 @@ export type TimerStateResponse = {
   started_at: string;
   finished_at: string | null;
   total_seconds: number;     // フィニッシュ時に確定した秒数
+  auto_stopped: number;      // 90分自動停止フラグ（1=自動停止）
   // 一時停止ログ（フロントでの経過時間計算に使用）
   pauses: Array<{
     pause_at: string;

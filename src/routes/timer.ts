@@ -54,6 +54,7 @@ async function buildTimerState(db: D1Database, session: StudySessionRecord): Pro
     finished_at: session.finished_at ?? null,
     frozen_at: (session as any).frozen_at ?? null,
     total_seconds: session.total_seconds,
+    auto_stopped: session.auto_stopped ?? 0,
     pauses: pauses.map(p => ({
       pause_at: p.pause_at,
       resume_at: p.resume_at ?? null,
@@ -95,6 +96,29 @@ timer.get('/current', async (c) => {
   const db = c.env.DB;
 
   const session = await getActiveSession(db, userId);
+
+  if (!session) {
+    return c.json({ success: true, data: null });
+  }
+
+  const state = await buildTimerState(db, session);
+  return c.json({ success: true, data: state });
+});
+
+// =============================================
+// GET /api/timer/pending-record
+// 90分自動停止後で未記録（subject IS NULL）の finished セッションを返す。
+// タイマーページを開いた時に確認し、案内バナーと記録ダイアログを表示するために使う。
+// =============================================
+timer.get('/pending-record', async (c) => {
+  const userId = c.get('userId');
+  const db = c.env.DB;
+
+  const session = await db.prepare(
+    `SELECT * FROM study_sessions
+     WHERE user_id = ? AND status = 'finished' AND auto_stopped = 1 AND subject IS NULL
+     ORDER BY finished_at DESC LIMIT 1`
+  ).bind(userId).first<StudySessionRecord>();
 
   if (!session) {
     return c.json({ success: true, data: null });
@@ -521,9 +545,9 @@ timer.post('/record', async (c) => {
     return c.json({ success: false, error: '記録対象のセッションが見つかりません' }, 404);
   }
 
-  // 60秒未満のセッションは保存不可
-  if ((session.total_seconds ?? 0) < 60) {
-    return c.json({ success: false, error: '1分未満の勉強は記録できません' }, 422);
+  // 300秒（5分）未満のセッションは保存不可
+  if ((session.total_seconds ?? 0) < 300) {
+    return c.json({ success: false, error: '5分未満の勉強は記録できません' }, 422);
   }
 
   // 既に記録済みかチェック
@@ -611,6 +635,95 @@ timer.post('/finish-abandoned', async (c) => {
 });
 
 // =============================================
+// POST /api/timer/auto-stop
+//
+// 90分経過時にフロントエンドから呼ぶ。
+// running/paused 状態のセッションを自動停止（auto_stopped=1）に変更する。
+// 記録確定はしない（subject/memo は入力待ち）。
+// =============================================
+timer.post('/auto-stop', async (c) => {
+  const userId = c.get('userId');
+  const db = c.env.DB;
+
+  const session = await getActiveSession(db, userId);
+
+  if (!session) {
+    return c.json({ success: false, error: 'アクティブなセッションがありません' }, 404);
+  }
+
+  const now = new Date().toISOString();
+
+  // 一時停止中のままなら resume_at を now に閉じる
+  if (session.status === 'paused') {
+    await db.prepare(
+      `UPDATE session_pauses SET resume_at = ? WHERE session_id = ? AND resume_at IS NULL`
+    ).bind(now, session.id).run();
+  }
+
+  const pauses = await getPauses(db, session.id);
+  const totalSeconds = calcTotalSeconds(session.started_at, now, pauses);
+
+  // auto_stopped=1 で finished にする
+  await db.prepare(
+    `UPDATE study_sessions
+     SET status = 'finished',
+         finished_at = ?,
+         total_seconds = ?,
+         auto_stopped = 1,
+         updated_at = ?
+     WHERE id = ?`
+  ).bind(now, totalSeconds, now, session.id).run();
+
+  const updated = await db.prepare(
+    'SELECT * FROM study_sessions WHERE id = ?'
+  ).bind(session.id).first<StudySessionRecord>();
+
+  const state = await buildTimerState(db, updated!);
+  return c.json({
+    success: true,
+    message: `90分経過のため自動停止しました（${formatSeconds(totalSeconds)}）`,
+    data: state,
+  });
+});
+
+// =============================================
+// GET /api/timer/auto-stop-count
+//
+// 今月（JST）のログインユーザーの自動停止回数を返す。
+// =============================================
+timer.get('/auto-stop-count', async (c) => {
+  const userId = c.get('userId');
+  const db = c.env.DB;
+
+  // JST 今月の開始・終了を UTC で算出
+  // UTC+9 なので JST 月初 00:00 = UTC 前日 15:00
+  const nowUtcMs = Date.now();
+  const jstOffsetMs = 9 * 60 * 60 * 1000;
+  const nowJst = new Date(nowUtcMs + jstOffsetMs);
+  const jstYear = nowJst.getUTCFullYear();
+  const jstMonth = nowJst.getUTCMonth(); // 0-indexed
+
+  // JST 月初 00:00:00 を UTC に変換
+  const monthStartUtc = new Date(Date.UTC(jstYear, jstMonth, 1, 0, 0, 0) - jstOffsetMs);
+  // JST 翌月初 00:00:00 を UTC に変換
+  const monthEndUtc = new Date(Date.UTC(jstYear, jstMonth + 1, 1, 0, 0, 0) - jstOffsetMs);
+
+  const row = await db.prepare(
+    `SELECT COUNT(*) as cnt FROM study_sessions
+     WHERE user_id = ?
+       AND auto_stopped = 1
+       AND started_at >= ?
+       AND started_at < ?`
+  ).bind(userId, monthStartUtc.toISOString(), monthEndUtc.toISOString())
+   .first<{ cnt: number }>();
+
+  return c.json({
+    success: true,
+    data: { count: row?.cnt ?? 0 },
+  });
+});
+
+// =============================================
 // POST /api/timer/discard
 // 60秒未満セッションを完全に無効化（DB から削除）する。
 //
@@ -635,7 +748,7 @@ timer.post('/discard', async (c) => {
     return c.json({ success: false, error: 'session_id が必要です' }, 400);
   }
 
-  // 本人所有・finished・60秒未満・未記録 であることを確認
+  // 本人所有・finished・300秒未満・未記録 であることを確認
   const session = await db.prepare(
     `SELECT id, total_seconds FROM study_sessions
      WHERE id = ? AND user_id = ? AND status = 'finished' AND subject IS NULL`
@@ -646,8 +759,8 @@ timer.post('/discard', async (c) => {
     return c.json({ success: true, message: '対象セッションなし（処理不要）' });
   }
 
-  if ((session.total_seconds ?? 0) >= 60) {
-    return c.json({ success: false, error: '60秒以上のセッションは破棄できません' }, 422);
+  if ((session.total_seconds ?? 0) >= 300) {
+    return c.json({ success: false, error: '5分以上のセッションは破棄できません' }, 422);
   }
 
   // DELETE で完全除去（session_pauses は CASCADE で自動削除）

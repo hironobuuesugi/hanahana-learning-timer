@@ -564,6 +564,21 @@ app.get('*', (c) => {
 
       </div>
 
+      <!-- 自動停止回数カード -->
+      <div class="card p-4 mb-6" id="auto-stop-card">
+        <h3 class="text-sm font-medium text-gray-500 mb-3 flex items-center gap-2">
+          <i class="fas fa-exclamation-triangle text-amber-400"></i>
+          今月の自動停止回数
+        </h3>
+        <div class="flex items-center justify-between">
+          <span class="text-sm text-gray-600">90分自動停止された回数</span>
+          <span id="auto-stop-count-badge" class="text-lg font-bold text-gray-700">--回</span>
+        </div>
+        <p class="text-xs text-gray-400 mt-2">
+          <i class="fas fa-info-circle mr-1"></i>タイマーをこまめにフィニッシュすることで防げます
+        </p>
+      </div>
+
       <!-- アカウント情報 -->
       <div class="card p-4">
         <h3 class="text-sm font-medium text-gray-500 mb-3 flex items-center gap-2">
@@ -817,6 +832,35 @@ app.get('*', (c) => {
     </header>
 
     <main class="max-w-lg mx-auto px-4 py-8">
+
+      <!-- 90分自動停止後の案内バナー（タイマー画面を開いた時に表示） -->
+      <div id="auto-stopped-banner" class="hidden mb-4 rounded-xl p-4 border-2 border-red-300 bg-red-50">
+        <div class="flex items-start gap-3">
+          <span class="text-2xl">⏰</span>
+          <div>
+            <p class="font-bold text-red-700 text-base">90分で自動停止しました</p>
+            <p class="text-sm text-red-600 mt-1">勉強内容を記録してください</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- 60分経過警告バナー（60分〜90分の間だけ表示） -->
+      <div id="timer-60min-warning" class="hidden mb-4 rounded-xl p-4 border-2 border-amber-400 bg-amber-50">
+        <div class="flex items-start gap-3">
+          <span class="text-2xl">⚠️</span>
+          <div>
+            <p class="font-bold text-amber-800 text-base">60分経過しました</p>
+            <p class="text-sm text-amber-700 mt-1">90分経過時点でタイマーは自動停止します</p>
+            <p class="text-sm text-amber-700">勉強中はこまめにタイマーを確認してください</p>
+            <p class="text-sm text-amber-700">終了している場合はフィニッシュして内容を記録してください</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- 5分未満の間だけ表示する案内 -->
+      <div id="timer-under5min" class="hidden mb-3 rounded-lg px-3 py-2 bg-gray-100 text-center">
+        <p class="text-sm text-gray-500">⏳ 5分未満は記録できません</p>
+      </div>
 
       <!-- タイマーメインカード -->
       <div class="card p-8 mb-6 text-center">
@@ -1264,6 +1308,8 @@ function updateHomeScreen(user) {
   fetchAndRenderStats();
   // テスト日を非同期で取得して表示
   fetchTestDate();
+  // 今月の自動停止回数を取得して表示
+  fetchAndRenderAutoStopCount();
 }
 
 // フォームタグのonsubmitでEnterキー送信をハンドリング済み
@@ -1331,6 +1377,32 @@ async function fetchAndRenderStats() {
   } catch (e) {
     // ネットワークエラーは集計欄を "--" のまま無視（既存機能に影響しない）
     console.warn('Stats fetch error:', e);
+  }
+}
+
+// =============================================
+// 今月の自動停止回数 - 取得・表示
+// =============================================
+async function fetchAndRenderAutoStopCount() {
+  try {
+    var res  = await fetch('/api/timer/auto-stop-count', { credentials: 'include' });
+    var json = await res.json();
+    if (!json.success) return;
+    var count = json.data.count || 0;
+    var badge = document.getElementById('auto-stop-count-badge');
+    if (!badge) return;
+    badge.textContent = count + '回';
+    // 色分け: 0〜2 → 通常(gray), 3〜4 → 黄色, 5以上 → 赤
+    badge.className = 'text-lg font-bold ';
+    if (count >= 5) {
+      badge.className += 'text-red-600';
+    } else if (count >= 3) {
+      badge.className += 'text-yellow-600';
+    } else {
+      badge.className += 'text-gray-700';
+    }
+  } catch (e) {
+    console.warn('AutoStopCount fetch error:', e);
   }
 }
 
@@ -2069,6 +2141,17 @@ async function initTimerPage() {
   clearTimerError();
   stopTimerTick();
 
+  // 自動停止フラグをリセット
+  timerAutoStopTriggered = false;
+
+  // 警告バナー類をすべて非表示にリセット
+  const warn60El = document.getElementById('timer-60min-warning');
+  if (warn60El) warn60El.classList.add('hidden');
+  const under5El = document.getElementById('timer-under5min');
+  if (under5El) under5El.classList.add('hidden');
+  const autoStoppedBanner = document.getElementById('auto-stopped-banner');
+  if (autoStoppedBanner) autoStoppedBanner.classList.add('hidden');
+
   // 画面を必ずリセット状態にする（前回の数字が残らないように）
   resetTimerDisplay();
 
@@ -2114,9 +2197,38 @@ async function initTimerPage() {
 
   } else {
     // ─── セッションなし / 終了済み → 通常の待機状態 ───
+    // ただし、90分自動停止後で未記録のセッションがある場合は案内バナーを表示する
     timerState = null;
-    renderTimerUI();
-    startTimerTick();
+
+    // 未記録の自動停止セッションを確認
+    let pendingState = null;
+    try {
+      const pRes = await fetch('/api/timer/pending-record', { credentials: 'include' });
+      const pData = await pRes.json();
+      if (pData.success && pData.data && pData.data.auto_stopped === 1) {
+        pendingState = pData.data;
+      }
+    } catch (err) { /* 無視 */ }
+
+    if (pendingState) {
+      // 90分自動停止後の未記録セッションがある → 案内バナーと記録ダイアログを表示
+      timerState = pendingState;
+      const banner = document.getElementById('auto-stopped-banner');
+      if (banner) banner.classList.remove('hidden');
+      const display = document.getElementById('timer-display');
+      if (display) display.textContent = formatSecondsDisplay(pendingState.total_seconds);
+      renderTimerUI();
+      if (pendingState.total_seconds >= 300) {
+        showRecordDialog(pendingState.session_id, pendingState.total_seconds);
+      } else {
+        const shortId = pendingState.session_id;
+        showTimerSuccess('5分未満の勉強は記録されません（自動停止）');
+        setTimeout(() => discardShortSessionAndGoHome(shortId), 1500);
+      }
+    } else {
+      renderTimerUI();
+      startTimerTick();
+    }
   }
 }
 
@@ -2247,10 +2359,25 @@ function renderTimerUI() {
 
 // -----------------------------------------------
 // 1秒ごとに経過時間を計算して表示する
+// 60分警告・90分自動停止・5分未満表示もここで管理
 // -----------------------------------------------
 function startTimerTick() {
   stopTimerTick(); // 二重起動防止
-  timerIntervalId = setInterval(() => {
+
+  // 即座に1回チェック（ページを開いた時点で60分超えている場合などに対応）
+  (async () => {
+    if (!timerState || timerState.status === 'idle' || timerState.status === 'finished' || timerState.status === 'frozen') return;
+    const elapsed = calcElapsedSeconds(timerState);
+    const display = document.getElementById('timer-display');
+    if (display) display.textContent = formatSecondsDisplay(elapsed);
+    const under5El = document.getElementById('timer-under5min');
+    if (under5El) { elapsed < 300 ? under5El.classList.remove('hidden') : under5El.classList.add('hidden'); }
+    const warn60El = document.getElementById('timer-60min-warning');
+    if (warn60El) { (elapsed >= 3600 && elapsed < 5400) ? warn60El.classList.remove('hidden') : warn60El.classList.add('hidden'); }
+    if (elapsed >= 5400 && !timerAutoStopTriggered) { timerAutoStopTriggered = true; await handleTimerAutoStop(); }
+  })();
+
+  timerIntervalId = setInterval(async () => {
     if (!timerState || timerState.status === 'idle' || timerState.status === 'finished' || timerState.status === 'frozen') {
       // 待機中・終了後・凍結中はタイマーを進めない
       return;
@@ -2258,7 +2385,77 @@ function startTimerTick() {
     const elapsed = calcElapsedSeconds(timerState);
     const display = document.getElementById('timer-display');
     if (display) display.textContent = formatSecondsDisplay(elapsed);
+
+    // ── 5分未満表示（5分 = 300秒） ──
+    const under5El = document.getElementById('timer-under5min');
+    if (under5El) {
+      if (elapsed < 300) {
+        under5El.classList.remove('hidden');
+      } else {
+        under5El.classList.add('hidden');
+      }
+    }
+
+    // ── 60分警告（60分 = 3600秒）～90分手前まで表示 ──
+    const warn60El = document.getElementById('timer-60min-warning');
+    if (warn60El) {
+      if (elapsed >= 3600 && elapsed < 5400) {
+        warn60El.classList.remove('hidden');
+      } else {
+        warn60El.classList.add('hidden');
+      }
+    }
+
+    // ── 90分自動停止（90分 = 5400秒） ──
+    if (elapsed >= 5400 && !timerAutoStopTriggered) {
+      timerAutoStopTriggered = true;
+      await handleTimerAutoStop();
+    }
   }, 1000);
+}
+
+// 90分自動停止が重複発火しないよう管理するフラグ
+let timerAutoStopTriggered = false;
+
+// -----------------------------------------------
+// 90分経過時の自動停止処理
+// -----------------------------------------------
+async function handleTimerAutoStop() {
+  stopTimerTick();
+
+  // 60分警告・5分未満表示を非表示に
+  const warn60El = document.getElementById('timer-60min-warning');
+  if (warn60El) warn60El.classList.add('hidden');
+  const under5El = document.getElementById('timer-under5min');
+  if (under5El) under5El.classList.add('hidden');
+
+  try {
+    const res = await fetch('/api/timer/auto-stop', {
+      method: 'POST',
+      credentials: 'include',
+    });
+    const data = await res.json();
+    if (data.success && data.data) {
+      timerState = data.data;
+      // 表示を確定秒数に固定
+      const display = document.getElementById('timer-display');
+      if (display) display.textContent = formatSecondsDisplay(timerState.total_seconds);
+      renderTimerUI();
+      // 記録ダイアログを表示（5分以上の場合のみ）
+      if (timerState.total_seconds >= 300) {
+        showRecordDialog(timerState.session_id, timerState.total_seconds);
+      } else {
+        // 5分未満なので破棄してホームへ
+        const shortId = timerState.session_id;
+        showTimerSuccess('5分未満の勉強は記録されません（自動停止）');
+        setTimeout(() => discardShortSessionAndGoHome(shortId), 1500);
+      }
+    } else {
+      showTimerError(data.error || '自動停止処理に失敗しました');
+    }
+  } catch (err) {
+    showTimerError('通信エラーが発生しました（自動停止）');
+  }
 }
 
 function stopTimerTick() {
@@ -2423,13 +2620,13 @@ async function handleTimerFinish() {
       stopTimerTick();
       renderTimerUI();
 
-      // 60秒未満: DBから削除してホームへ戻る
-      if (timerState.total_seconds < 60) {
+      // 5分未満: DBから削除してホームへ戻る
+      if (timerState.total_seconds < 300) {
         const shortId = timerState.session_id;
         stopTimerTick();
         renderTimerUI();
         // 「記録されません」メッセージを一瞬表示してからホームへ
-        showTimerSuccess('1分未満の勉強は記録されません');
+        showTimerSuccess('5分未満の勉強は記録されません');
         setTimeout(() => discardShortSessionAndGoHome(shortId), 1500);
       } else {
         showRecordDialog(timerState.session_id, timerState.total_seconds);
@@ -2587,13 +2784,13 @@ async function handleAbandonedFinish() {
       stopTimerTick();
       renderTimerUI();
 
-      // 60秒未満: DBから削除してホームへ戻る
-      if (timerState.total_seconds < 60) {
+      // 5分未満: DBから削除してホームへ戻る
+      if (timerState.total_seconds < 300) {
         const shortId = timerState.session_id;
         closeAbandonedDialog();
         stopTimerTick();
         renderTimerUI();
-        showTimerSuccess('1分未満の勉強は記録されません');
+        showTimerSuccess('5分未満の勉強は記録されません');
         setTimeout(() => discardShortSessionAndGoHome(shortId), 1500);
       } else {
         showRecordDialog(timerState.session_id, timerState.total_seconds);
