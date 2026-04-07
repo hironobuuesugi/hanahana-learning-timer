@@ -30,6 +30,28 @@ app.use('/api/*', cors({
 app.use('/static/*', serveStatic({ root: './public' }))
 
 // =============================================
+// manifest.json 配信（PWA・ホーム画面アイコン用）
+// public/manifest.json をテキストとして返す
+// =============================================
+app.get('/manifest.json', (c) => {
+  c.header('Content-Type', 'application/manifest+json; charset=utf-8')
+  return c.text(JSON.stringify({
+    name: '花はなタイマー',
+    short_name: '花はなタイマー',
+    display: 'standalone',
+    background_color: '#ffffff',
+    theme_color: '#ffffff',
+    icons: [
+      {
+        src: '/timer-1024.png',
+        sizes: '1024x1024',
+        type: 'image/png',
+      },
+    ],
+  }))
+})
+
+// =============================================
 // APIルート登録
 // =============================================
 app.route('/api/auth', authRoutes)
@@ -51,6 +73,8 @@ app.get('*', (c) => {
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>花はな Learning Timer</title>
+  <link rel="manifest" href="/manifest.json" />
+  <link rel="apple-touch-icon" href="/timer-1024.png" />
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" />
   <style>

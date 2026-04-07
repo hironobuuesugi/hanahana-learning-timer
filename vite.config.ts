@@ -5,7 +5,10 @@ import { defineConfig } from 'vite'
 
 export default defineConfig({
   plugins: [
-    build(),
+    build({
+      // アイコン・マニフェストをWorkerではなく静的ファイルとして配信
+      staticPaths: ['/static/*', '/timer-1024.png', '/manifest.json'],
+    }),
     devServer({
       adapter,
       entry: 'src/index.tsx'

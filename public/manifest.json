@@ -1,0 +1,14 @@
+{
+  "name": "花はなタイマー",
+  "short_name": "花はなタイマー",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#ffffff",
+  "icons": [
+    {
+      "src": "/timer-1024.png",
+      "sizes": "1024x1024",
+      "type": "image/png"
+    }
+  ]
+}
