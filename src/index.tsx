@@ -1382,11 +1382,21 @@ function buildRankRow(entry, myDisplayName) {
   var badgeClass = getRankBadgeClass(entry.rank);
   var rowBg = isMe ? 'bg-pink-50 border border-pink-200' : 'bg-gray-50';
   var nameLabel = isMe ? '<span class="text-xs text-pink-500 font-bold ml-1">（あなた）</span>' : '';
+  // 今日の増加時間（正の値のみ表示）
+  var todaySeconds = entry.today_seconds || 0;
+  var todayLabel = '';
+  if (todaySeconds > 0) {
+    var todayMin = Math.floor(todaySeconds / 60);
+    var todayHour = Math.floor(todayMin / 60);
+    var todayRemMin = todayMin % 60;
+    var todayStr = todayHour > 0 ? (todayHour + '時間' + (todayRemMin > 0 ? todayRemMin + '分' : '')) : (todayRemMin + '分');
+    todayLabel = '<span style="font-size:0.72rem;color:#059669;font-weight:600;margin-left:4px;white-space:nowrap;">+' + todayStr + '</span>';
+  }
   return (
     '<div class="flex items-center gap-3 rounded-xl px-3 py-2 ' + rowBg + '">' +
       '<span class="flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ' + badgeClass + '">' + entry.rank + '</span>' +
       '<span class="flex-1 text-sm text-gray-700 truncate">' + escapeHtml(entry.display_name) + nameLabel + '</span>' +
-      '<span class="text-sm font-bold text-gray-600">' + formatSecondsRanking(entry.seconds) + '</span>' +
+      '<span class="text-sm font-bold text-gray-600">' + formatSecondsRanking(entry.seconds) + todayLabel + '</span>' +
     '</div>'
   );
 }
@@ -1738,7 +1748,7 @@ function groupRecordsByDate(records) {
     }
 
     // 勉強内容を追加（空除外）。セッションIDと一緒に保持する
-    g.memos.push({ id: rec.id, text: rec.memo ? rec.memo.trim() : '' });
+    g.memos.push({ id: rec.id, text: rec.memo ? rec.memo.trim() : '', totalSeconds: rec.total_seconds || 0 });
   });
 
   // dateKey の降順（新しい日が上）に並べて返す
@@ -1777,9 +1787,12 @@ function buildDayCard(group) {
     memosHtml = group.memos.map(function(m) {
       var sid = m.id;
       var txt = m.text || '';
+      var durMin = Math.round((m.totalSeconds || 0) / 60);
+      var durLabel = durMin + '分';
       return (
         '<div id="memo-view-' + sid + '" style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:6px;">'
         + '<span style="font-size:0.875rem;color:#4b5563;flex:1;white-space:pre-wrap;" id="memo-text-' + sid + '">' + escapeHtml(txt) + '</span>'
+        + '<span style="font-size:0.875rem;color:#6b7ea8;white-space:nowrap;flex-shrink:0;">' + durLabel + '</span>'
         + '<button onclick="startEditMemo(' + sid + ')" title="編集" style="font-size:0.8rem;color:#9ca3af;border:1px solid #e5e7eb;border-radius:6px;padding:2px 6px;background:#f9fafb;white-space:nowrap;cursor:pointer;line-height:1.4;">✏️</button>'
         + '</div>'
         + '<div id="memo-edit-' + sid + '" style="display:none;margin-bottom:6px;">'
