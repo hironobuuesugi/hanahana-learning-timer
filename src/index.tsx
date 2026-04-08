@@ -2172,28 +2172,15 @@ async function initTimerPage() {
     showAbandonedDialog(serverState);
 
   } else if (serverState && (serverState.status === 'running' || serverState.status === 'paused')) {
-    // ─── running/paused のまま残っている（古い状態）→ まず凍結してからダイアログ ───
-    // ブラウザ再起動等でfreezeが呼ばれなかったケースの救済
-    try {
-      const freezeRes = await fetch('/api/timer/freeze', {
-        method: 'POST',
-        credentials: 'include',
-      });
-      const freezeData = await freezeRes.json();
-      if (freezeData.success && freezeData.data) {
-        timerState = freezeData.data;
-        showAbandonedDialog(freezeData.data);
-      } else {
-        // 凍結失敗時はそのまま表示
-        timerState = serverState;
-        renderTimerUI();
-        startTimerTick();
-      }
-    } catch (err) {
-      timerState = serverState;
-      renderTimerUI();
-      startTimerTick();
-    }
+    // ─── running/paused → アプリ内ページ遷移から戻ってきた場合はそのまま再開 ───
+    // タイマーが動いたまま別ページへ移動し戻ってきたケース（正常な内部ナビゲーション）
+    // サーバー側のセッションは running/paused のまま維持されているので、
+    // クライアント側の tick を再開するだけでよい。
+    // ※ 真のページ離脱（タブ/ブラウザを閉じる）は pagehide → sendBeacon で
+    //    frozen 状態になるため、次回アクセス時は上の frozen ブランチで処理される。
+    timerState = serverState;
+    renderTimerUI();
+    startTimerTick();
 
   } else {
     // ─── セッションなし / 終了済み → 通常の待機状態 ───
@@ -2644,29 +2631,23 @@ async function handleTimerFinish() {
 // -----------------------------------------------
 // ホームに戻るボタン
 //
-// タイマーが running/paused の場合は凍結してからホームへ。
-// frozen/finished/idle の場合はそのままホームへ。
+// 【変更】アプリ内ページ遷移ではサーバー側のタイマーセッションを
+// 凍結しない。クライアント側の tick を止めるだけにとどめ、
+// サーバー側のステータス（running / paused）はそのまま維持する。
+//
+// 凍結（freeze）は以下の場合にのみ行う:
+//   ・ブラウザタブを閉じる（pagehide イベント経由）
+//   ・ブラウザ/アプリを終了する（pagehide イベント経由）
+//
+// タイマーページに戻ってきたとき（initTimerPage）は、
+// サーバーが running / paused であればそのまま再開する。
 // -----------------------------------------------
-async function handleTimerBack() {
+function handleTimerBack() {
+  // クライアント側の tick を停止するだけ（サーバーへのリクエストはしない）
   stopTimerTick();
   closeAbandonedDialog();
 
-  // タイマーが動作中 (running / paused) なら凍結してからホームへ
-  if (timerState && (timerState.status === 'running' || timerState.status === 'paused')) {
-    try {
-      const res = await fetch('/api/timer/freeze', {
-        method: 'POST',
-        credentials: 'include',
-      });
-      const data = await res.json();
-      if (data.success && data.data) {
-        timerState = data.data; // frozen 状態に更新
-      }
-    } catch (err) {
-      // 通信エラーでも画面遷移は行う
-    }
-  }
-
+  // サーバー側のセッション状態は変えずにホーム画面へ遷移
   showPage('page-home');
 }
 
