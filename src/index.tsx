@@ -940,6 +940,91 @@ app.get('*', (c) => {
       <!-- 成功メッセージ -->
       <div id="timer-success" class="hidden bg-green-50 border border-green-200 text-green-700 text-sm rounded-lg p-3 mb-4 text-center font-medium"></div>
 
+      <!-- =============================================
+           タイマールール表示エリア
+           ・タイマー状態に一切影響しない純粋な表示UI
+           ・ページ遷移なし・freeze/pause/stop発火なし
+           ・折りたたみはこの要素内でのみ完結
+           ============================================= -->
+      <div class="card p-4 mb-6">
+        <!-- ヘッダー（常時表示） -->
+        <div class="flex items-center gap-2 mb-3">
+          <i class="fas fa-book-open text-pink-400"></i>
+          <h3 class="text-sm font-bold text-gray-700">タイマールール</h3>
+        </div>
+
+        <!-- 最重要一文（常時表示・太字） -->
+        <p class="text-sm font-bold text-gray-800 mb-3 leading-relaxed">
+          このタイマーは勉強した時間を正しく記録するためのものです。
+        </p>
+
+        <!-- 常時表示：最初の4項目 -->
+        <ul class="space-y-2 text-sm text-gray-600">
+          <li class="flex items-start gap-2">
+            <span class="text-pink-400 mt-0.5 flex-shrink-0">▶</span>
+            <span>勉強を始めるときにスタート</span>
+          </li>
+          <li class="flex items-start gap-2">
+            <span class="text-pink-400 mt-0.5 flex-shrink-0">▶</span>
+            <span>勉強が終わったらフィニッシュ</span>
+          </li>
+          <li class="flex items-start gap-2">
+            <span class="text-amber-500 mt-0.5 flex-shrink-0">▶</span>
+            <span>休憩・ご飯・スマホを触るときは一時停止</span>
+          </li>
+          <li class="flex items-start gap-2">
+            <span class="text-amber-500 mt-0.5 flex-shrink-0">▶</span>
+            <span>塾の授業中は使えません</span>
+          </li>
+        </ul>
+
+        <!-- 折りたたみ部分：残り7項目 -->
+        <div id="timer-rules-extra" class="hidden mt-2">
+          <ul class="space-y-2 text-sm text-gray-600">
+            <li class="flex items-start gap-2">
+              <span class="text-blue-400 mt-0.5 flex-shrink-0">▶</span>
+              <span>使えるのは演習コース、自習、家での勉強です</span>
+            </li>
+            <li class="flex items-start gap-2">
+              <span class="text-blue-400 mt-0.5 flex-shrink-0">▶</span>
+              <span>答えを写すだけなどの作業は勉強に含みません</span>
+            </li>
+            <li class="flex items-start gap-2">
+              <span class="text-red-400 mt-0.5 flex-shrink-0">▶</span>
+              <span>90分で自動停止します</span>
+            </li>
+            <li class="flex items-start gap-2">
+              <span class="text-red-400 mt-0.5 flex-shrink-0">▶</span>
+              <span>自動停止回数は記録されています</span>
+            </li>
+            <li class="flex items-start gap-2">
+              <span class="text-orange-400 mt-0.5 flex-shrink-0">▶</span>
+              <span>60分を過ぎたらタイマーをたまに確認してください</span>
+            </li>
+            <li class="flex items-start gap-2">
+              <span class="text-purple-400 mt-0.5 flex-shrink-0">▶</span>
+              <span>勉強した教科と内容は具体的に書いてください</span>
+            </li>
+            <li class="flex items-start gap-2">
+              <span class="text-purple-400 mt-0.5 flex-shrink-0">▶</span>
+              <span>複数教科を選ぶと時間は均等に分けて記録されます</span>
+            </li>
+          </ul>
+        </div>
+
+        <!-- 「すべて表示」「閉じる」トグルボタン -->
+        <button
+          type="button"
+          id="timer-rules-toggle-btn"
+          onclick="toggleTimerRules()"
+          class="mt-3 text-xs text-pink-500 hover:text-pink-700 font-medium flex items-center gap-1 transition-colors"
+        >
+          <i id="timer-rules-toggle-icon" class="fas fa-chevron-down text-xs"></i>
+          <span id="timer-rules-toggle-text">すべて表示</span>
+        </button>
+      </div>
+      <!-- /タイマールール表示エリア -->
+
     </main>
   </div>
 </div>
@@ -1435,6 +1520,29 @@ var GACHA_ITEMS = [
   '国語の学習を2ページ進める',
   '英単語帳を5分だけ眺める（意味とスペルを確認する）',
 ];
+
+// =============================================
+// タイマールール 折りたたみトグル
+// ・タイマー状態（timerState）に一切触れない
+// ・freeze / pause / stop を発火させない
+// ・DOM の表示切替のみを行う純粋なUI関数
+// =============================================
+function toggleTimerRules() {
+  var extra   = document.getElementById('timer-rules-extra');
+  var icon    = document.getElementById('timer-rules-toggle-icon');
+  var text    = document.getElementById('timer-rules-toggle-text');
+  if (!extra) return;
+  var isHidden = extra.classList.contains('hidden');
+  if (isHidden) {
+    extra.classList.remove('hidden');
+    if (icon) { icon.className = 'fas fa-chevron-up text-xs'; }
+    if (text) { text.textContent = '閉じる'; }
+  } else {
+    extra.classList.add('hidden');
+    if (icon) { icon.className = 'fas fa-chevron-down text-xs'; }
+    if (text) { text.textContent = 'すべて表示'; }
+  }
+}
 
 // ガチャを引いて結果を表示する
 function drawGacha() {
