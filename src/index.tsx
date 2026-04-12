@@ -466,6 +466,26 @@ app.get('*', (c) => {
         </div>
       </div>
 
+      <!-- 連続記録カード -->
+      <div class="card p-4 mb-6" id="streak-card">
+        <h3 class="text-sm font-medium text-gray-500 mb-3 flex items-center gap-2">
+          <i class="fas fa-fire text-orange-400"></i>
+          連続記録
+        </h3>
+        <div class="grid grid-cols-2 gap-3">
+          <div class="bg-orange-50 rounded-xl p-3 text-center">
+            <p class="text-xs text-orange-400 font-medium mb-1">🔥 連続記録</p>
+            <p class="text-2xl font-bold text-orange-500" id="home-streak-current">--</p>
+            <p class="text-xs text-orange-400">日</p>
+          </div>
+          <div class="bg-red-50 rounded-xl p-3 text-center">
+            <p class="text-xs text-red-400 font-medium mb-1">🏆 自己ベスト</p>
+            <p class="text-2xl font-bold text-red-500" id="home-streak-best">--</p>
+            <p class="text-xs text-red-400">日</p>
+          </div>
+        </div>
+      </div>
+
       <!-- テスト日カード -->
       <div class="card p-4 mb-6" id="testdate-card">
         <h3 class="text-sm font-medium text-gray-500 mb-3 flex items-center gap-2">
@@ -974,6 +994,10 @@ app.get('*', (c) => {
           </li>
           <li class="flex items-start gap-2">
             <span class="text-amber-500 mt-0.5 flex-shrink-0">▶</span>
+            <span>勉強していないときにタイマーを放置しないでください</span>
+          </li>
+          <li class="flex items-start gap-2">
+            <span class="text-amber-500 mt-0.5 flex-shrink-0">▶</span>
             <span>塾の授業中は使えません</span>
           </li>
         </ul>
@@ -1004,6 +1028,10 @@ app.get('*', (c) => {
             <li class="flex items-start gap-2">
               <span class="text-purple-400 mt-0.5 flex-shrink-0">▶</span>
               <span>勉強した教科と内容は具体的に書いてください</span>
+            </li>
+            <li class="flex items-start gap-2">
+              <span class="text-purple-400 mt-0.5 flex-shrink-0">　</span>
+              <span class="text-gray-400 italic">例：Unit3 英単語を3回書いた</span>
             </li>
             <li class="flex items-start gap-2">
               <span class="text-purple-400 mt-0.5 flex-shrink-0">▶</span>
@@ -1391,6 +1419,8 @@ function updateHomeScreen(user) {
 
   // 勉強時間集計を非同期で取得して表示（既存機能に影響しない）
   fetchAndRenderStats();
+  // 連続記録日数・自己ベストを非同期で取得して表示
+  fetchAndRenderStreak();
   // テスト日を非同期で取得して表示
   fetchTestDate();
   // 今月の自動停止回数を取得して表示
@@ -1462,6 +1492,25 @@ async function fetchAndRenderStats() {
   } catch (e) {
     // ネットワークエラーは集計欄を "--" のまま無視（既存機能に影響しない）
     console.warn('Stats fetch error:', e);
+  }
+}
+
+// =============================================
+// 連続記録日数・自己ベスト - 取得・表示
+// =============================================
+async function fetchAndRenderStreak() {
+  try {
+    var res  = await fetch('/api/stats/streak', { credentials: 'include' });
+    var json = await res.json();
+    if (!json.success) return;
+    var current = json.data.current_streak || 0;
+    var best    = json.data.best_streak    || 0;
+    var currentEl = document.getElementById('home-streak-current');
+    var bestEl    = document.getElementById('home-streak-best');
+    if (currentEl) currentEl.textContent = String(current);
+    if (bestEl)    bestEl.textContent    = String(best);
+  } catch (e) {
+    console.warn('Streak fetch error:', e);
   }
 }
 
@@ -2398,6 +2447,7 @@ async function discardShortSessionAndGoHome(sessionId) {
   // ホーム画面へ移動＋集計更新
   showPage('page-home');
   fetchAndRenderStats();
+  fetchAndRenderStreak();
 }
 
 // -----------------------------------------------
@@ -3018,6 +3068,7 @@ async function handleRecordSave() {
       // ホーム画面へ自動遷移＋集計更新
       showPage('page-home');
       fetchAndRenderStats();
+      fetchAndRenderStreak();
 
     } else {
       if (errEl) {

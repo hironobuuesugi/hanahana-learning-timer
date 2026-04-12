@@ -244,4 +244,117 @@ stats.get('/subjects', async (c) => {
   });
 });
 
+// =============================================
+// GET /api/stats/streak - 連続記録日数・自己ベスト連続記録日数
+//
+// レスポンス:
+//   {
+//     success: true,
+//     data: {
+//       current_streak: number,  // 現在の連続記録日数（JST基準、今日まで）
+//       best_streak:    number,  // 過去最大の連続記録日数
+//     }
+//   }
+//
+// 計算ルール:
+//   - 対象: status='finished' かつ subject IS NOT NULL（記録保存済みセッション）
+//   - 1日に1回でも記録保存したらその日を「達成日」とカウント
+//   - 日付は JST 基準 (date(started_at, '+9 hours'))
+//   - current_streak: 今日(JST)から遡って連続している日数
+//     ※今日に記録があれば今日を含む、なければ昨日から遡る
+//   - best_streak: 全期間の最大連続記録日数
+// =============================================
+stats.get('/streak', async (c) => {
+  const userId = c.get('userId');
+  const db = c.env.DB;
+
+  // JST 今日の日付文字列を取得
+  const now = new Date();
+  const jstNow = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+  const todayStr = jstNow.toISOString().slice(0, 10); // YYYY-MM-DD
+
+  // 記録がある全日付リストを JST で取得（降順）
+  const rows = await db.prepare(`
+    SELECT DISTINCT date(started_at, '+9 hours') AS jst_date
+    FROM study_sessions
+    WHERE user_id = ?
+      AND status  = 'finished'
+      AND subject IS NOT NULL
+    ORDER BY jst_date DESC
+  `).bind(userId).all<{ jst_date: string }>();
+
+  const dates: string[] = (rows.results ?? []).map(r => r.jst_date);
+
+  if (dates.length === 0) {
+    return c.json({ success: true, data: { current_streak: 0, best_streak: 0 } });
+  }
+
+  // ─────────────────────────────────────────
+  // current_streak 計算
+  //   1. 今日(JST)に記録があれば今日を起点にして遡る
+  //   2. 今日に記録がなく昨日に記録があれば昨日を起点にして遡る
+  //   3. どちらもなければ 0
+  // ─────────────────────────────────────────
+  const dateSet = new Set(dates);
+
+  // 今日の前日 (JST)
+  const yesterdayJst = new Date(jstNow.getTime() - 24 * 60 * 60 * 1000);
+  const yesterdayStr = yesterdayJst.toISOString().slice(0, 10);
+
+  let currentStreak = 0;
+  if (dateSet.has(todayStr)) {
+    // 今日を含めて遡る
+    let checkDate = new Date(jstNow);
+    while (true) {
+      const d = checkDate.toISOString().slice(0, 10);
+      if (!dateSet.has(d)) break;
+      currentStreak++;
+      checkDate = new Date(checkDate.getTime() - 24 * 60 * 60 * 1000);
+    }
+  } else if (dateSet.has(yesterdayStr)) {
+    // 昨日から遡る（今日はまだ勉強していないが連続中）
+    let checkDate = new Date(yesterdayJst);
+    while (true) {
+      const d = checkDate.toISOString().slice(0, 10);
+      if (!dateSet.has(d)) break;
+      currentStreak++;
+      checkDate = new Date(checkDate.getTime() - 24 * 60 * 60 * 1000);
+    }
+  }
+  // 今日も昨日も記録がなければ currentStreak = 0
+
+  // ─────────────────────────────────────────
+  // best_streak 計算
+  //   昇順に並んだ全達成日リストを1日ずつチェックし
+  //   連続している区間の最大長を求める
+  // ─────────────────────────────────────────
+  const sortedDates = [...dates].sort(); // 昇順
+  let bestStreak = 1;
+  let runStreak  = 1;
+
+  for (let i = 1; i < sortedDates.length; i++) {
+    const prev = new Date(sortedDates[i - 1] + 'T00:00:00Z');
+    const curr = new Date(sortedDates[i]     + 'T00:00:00Z');
+    const diffDays = Math.round((curr.getTime() - prev.getTime()) / (24 * 60 * 60 * 1000));
+
+    if (diffDays === 1) {
+      runStreak++;
+      if (runStreak > bestStreak) bestStreak = runStreak;
+    } else {
+      runStreak = 1;
+    }
+  }
+
+  // current_streak が best_streak を超える場合も考慮
+  if (currentStreak > bestStreak) bestStreak = currentStreak;
+
+  return c.json({
+    success: true,
+    data: {
+      current_streak: currentStreak,
+      best_streak:    bestStreak,
+    },
+  });
+});
+
 export default stats;
