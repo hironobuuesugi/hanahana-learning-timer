@@ -496,15 +496,15 @@ app.get('*', (c) => {
         </h3>
         <!-- 年月ラベル -->
         <p class="text-xs text-gray-400 text-center mb-2" id="calendar-month-label"></p>
-        <!-- 曜日ヘッダー -->
+        <!-- 曜日ヘッダー (月曜始まり) -->
         <div class="grid grid-cols-7 mb-1">
-          <span class="text-center text-xs font-medium text-red-400">日</span>
           <span class="text-center text-xs font-medium text-gray-400">月</span>
           <span class="text-center text-xs font-medium text-gray-400">火</span>
           <span class="text-center text-xs font-medium text-gray-400">水</span>
           <span class="text-center text-xs font-medium text-gray-400">木</span>
           <span class="text-center text-xs font-medium text-gray-400">金</span>
           <span class="text-center text-xs font-medium text-blue-400">土</span>
+          <span class="text-center text-xs font-medium text-red-400">日</span>
         </div>
         <!-- 日付グリッド（JSで描画） -->
         <div id="calendar-grid" class="grid grid-cols-7 gap-1"></div>
@@ -1634,7 +1634,9 @@ async function fetchAndRenderCalendar() {
     if (!gridEl) return;
 
     // 今月の1日の曜日 (0=日, 1=月, ..., 6=土)
-    var firstDayOfWeek = new Date(Date.UTC(year, month - 1, 1)).getUTCDay();
+    var rawDow = new Date(Date.UTC(year, month - 1, 1)).getUTCDay();
+    // 月曜始まりに変換: 月=0, 火=1, ..., 土=5, 日=6
+    var firstDayOfWeek = (rawDow === 0) ? 6 : rawDow - 1;
 
     // 今月の末日
     var lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
@@ -1645,7 +1647,7 @@ async function fetchAndRenderCalendar() {
 
     var cells = [];
 
-    // 1日前の空白セル
+    // 1日前の空白セル（月曜始まり基準）
     for (var i = 0; i < firstDayOfWeek; i++) {
       cells.push('<div></div>');
     }
@@ -1820,12 +1822,14 @@ function buildRankRow(entry, myDisplayName, showComment) {
     todayLabel = '<span style="font-size:0.72rem;color:#059669;font-weight:600;margin-left:4px;white-space:nowrap;">+' + todayStr + '</span>';
   }
   // 💬コメントボタン（今月Top5のみ）
+  // data-uid / data-dname 属性を使い、onclick 内でシングルクォートを使わない形に変更
+  // （Viteのminifyが '\' エスケープを除去して構文エラーになるのを防ぐため）
   var commentBtn = '';
   if (showComment && entry.user_id) {
     var uid = escapeHtml(entry.user_id);
     var dname = escapeHtml(entry.display_name);
-    commentBtn = '<button onclick="openCommentModal(\'' + uid + '\',\'' + dname + '\')" ' +
-      'class="flex-shrink-0 text-base leading-none px-1 py-0.5 rounded hover:bg-blue-50 transition-colors" ' +
+    commentBtn = '<button class="flex-shrink-0 text-base leading-none px-1 py-0.5 rounded hover:bg-blue-50 transition-colors comment-btn" ' +
+      'data-uid="' + uid + '" data-dname="' + dname + '" ' +
       'title="先生コメント" aria-label="先生コメントを見る">💬</button>';
   }
   return (
@@ -2078,6 +2082,21 @@ async function initRankingPage() {
       errorEl.textContent = '通信エラーが発生しました';
       errorEl.classList.remove('hidden');
     }
+  }
+
+  // 💬ボタン: data-uid / data-dname を使ったイベント委譲
+  // buildRankRow で onclick を直接書くと Vite minify でシングルクォートが壊れるため
+  // ランキングリスト全体に一度だけ委譲ハンドラを登録する
+  var rankingPage = document.getElementById('page-ranking');
+  if (rankingPage && !rankingPage._commentHandlerSet) {
+    rankingPage._commentHandlerSet = true;
+    rankingPage.addEventListener('click', function(e) {
+      var btn = e.target.closest('.comment-btn');
+      if (!btn) return;
+      var uid   = btn.getAttribute('data-uid');
+      var dname = btn.getAttribute('data-dname');
+      if (uid && dname) openCommentModal(uid, dname);
+    });
   }
 }
 
