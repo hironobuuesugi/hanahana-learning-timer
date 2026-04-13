@@ -357,4 +357,57 @@ stats.get('/streak', async (c) => {
   });
 });
 
+// =============================================
+// GET /api/stats/calendar - 今月の勉強達成日付一覧
+//
+// レスポンス:
+//   {
+//     success: true,
+//     data: {
+//       year:        number,    // JST 今月の年
+//       month:       number,    // JST 今月の月 (1-12)
+//       study_dates: string[],  // 勉強した日の日付 YYYY-MM-DD リスト
+//     }
+//   }
+//
+// 計算ルール:
+//   - 対象: status='finished' かつ subject IS NOT NULL（記録保存済みセッション）
+//   - 1日に1回以上記録があればその日を「勉強達成」とする
+//   - 日付は JST 基準 (date(started_at, '+9 hours'))
+//   - 今月分のみ返す (strftime('%Y-%m', started_at, '+9 hours') = 今月YYYY-MM)
+// =============================================
+stats.get('/calendar', async (c) => {
+  const userId = c.get('userId');
+  const db = c.env.DB;
+
+  // JST 今月を取得
+  const now = new Date();
+  const jstNow = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+  const year     = jstNow.getUTCFullYear();
+  const month    = jstNow.getUTCMonth() + 1; // 1-12
+  const monthStr = jstNow.toISOString().slice(0, 7); // YYYY-MM
+
+  // 今月の勉強達成日付を取得（DISTINCT で1日1件に絞る）
+  const rows = await db.prepare(`
+    SELECT DISTINCT date(started_at, '+9 hours') AS jst_date
+    FROM study_sessions
+    WHERE user_id = ?
+      AND status  = 'finished'
+      AND subject IS NOT NULL
+      AND strftime('%Y-%m', started_at, '+9 hours') = ?
+    ORDER BY jst_date ASC
+  `).bind(userId, monthStr).all<{ jst_date: string }>();
+
+  const studyDates = (rows.results ?? []).map(r => r.jst_date);
+
+  return c.json({
+    success: true,
+    data: {
+      year,
+      month,
+      study_dates: studyDates,
+    },
+  });
+});
+
 export default stats;

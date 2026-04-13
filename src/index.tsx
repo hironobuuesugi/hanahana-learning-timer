@@ -488,6 +488,28 @@ app.get('*', (c) => {
         </div>
       </div>
 
+      <!-- 勉強記録カレンダーカード -->
+      <div class="card p-4 mb-6" id="calendar-card">
+        <h3 class="text-sm font-medium text-gray-500 mb-3 flex items-center gap-2">
+          <i class="fas fa-calendar-alt text-pink-400"></i>
+          勉強記録カレンダー
+        </h3>
+        <!-- 年月ラベル -->
+        <p class="text-xs text-gray-400 text-center mb-2" id="calendar-month-label"></p>
+        <!-- 曜日ヘッダー -->
+        <div class="grid grid-cols-7 mb-1">
+          <span class="text-center text-xs font-medium text-red-400">日</span>
+          <span class="text-center text-xs font-medium text-gray-400">月</span>
+          <span class="text-center text-xs font-medium text-gray-400">火</span>
+          <span class="text-center text-xs font-medium text-gray-400">水</span>
+          <span class="text-center text-xs font-medium text-gray-400">木</span>
+          <span class="text-center text-xs font-medium text-gray-400">金</span>
+          <span class="text-center text-xs font-medium text-blue-400">土</span>
+        </div>
+        <!-- 日付グリッド（JSで描画） -->
+        <div id="calendar-grid" class="grid grid-cols-7 gap-1"></div>
+      </div>
+
       <!-- テスト日カード -->
       <div class="card p-4 mb-6" id="testdate-card">
         <h3 class="text-sm font-medium text-gray-500 mb-3 flex items-center gap-2">
@@ -1492,6 +1514,8 @@ function updateHomeScreen(user) {
   fetchAndRenderStats();
   // 連続記録日数・自己ベストを非同期で取得して表示
   fetchAndRenderStreak();
+  // 勉強記録カレンダーを非同期で取得して表示
+  fetchAndRenderCalendar();
   // テスト日を非同期で取得して表示
   fetchTestDate();
   // 今月の自動停止回数を取得して表示
@@ -1582,6 +1606,84 @@ async function fetchAndRenderStreak() {
     if (bestEl)    bestEl.textContent    = String(best);
   } catch (e) {
     console.warn('Streak fetch error:', e);
+  }
+}
+
+// =============================================
+// 勉強記録カレンダー - 取得・表示
+// =============================================
+async function fetchAndRenderCalendar() {
+  try {
+    var res  = await fetch('/api/stats/calendar', { credentials: 'include' });
+    var json = await res.json();
+    if (!json.success) return;
+
+    var year       = json.data.year;
+    var month      = json.data.month;
+    var studyDates = json.data.study_dates || [];  // ["YYYY-MM-DD", ...]
+
+    // 達成日をSetに変換して高速ルックアップ
+    var studySet = new Set(studyDates);
+
+    // 月ラベル更新
+    var labelEl = document.getElementById('calendar-month-label');
+    if (labelEl) labelEl.textContent = year + '年' + month + '月';
+
+    // カレンダーグリッド描画
+    var gridEl = document.getElementById('calendar-grid');
+    if (!gridEl) return;
+
+    // 今月の1日の曜日 (0=日, 1=月, ..., 6=土)
+    var firstDayOfWeek = new Date(Date.UTC(year, month - 1, 1)).getUTCDay();
+
+    // 今月の末日
+    var lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+
+    // JST今日の日付 (比較用)
+    var nowJst   = new Date(new Date().getTime() + 9 * 60 * 60 * 1000);
+    var todayStr = nowJst.toISOString().slice(0, 10);
+
+    var cells = [];
+
+    // 1日前の空白セル
+    for (var i = 0; i < firstDayOfWeek; i++) {
+      cells.push('<div></div>');
+    }
+
+    // 日付セル
+    for (var d = 1; d <= lastDay; d++) {
+      var mm    = String(month).padStart(2, '0');
+      var dd    = String(d).padStart(2, '0');
+      var dateStr = year + '-' + mm + '-' + dd;
+      var isStudy  = studySet.has(dateStr);
+      var isToday  = (dateStr === todayStr);
+      var isFuture = (dateStr > todayStr);
+
+      var cellClass = 'flex items-center justify-center rounded-lg text-xs font-medium aspect-square select-none ';
+
+      if (isToday && isStudy) {
+        // 今日かつ勉強した → ピンク強調＋リング
+        cellClass += 'bg-pink-400 text-white ring-2 ring-pink-300 ring-offset-1';
+      } else if (isToday) {
+        // 今日だが未勉強 → リングのみ
+        cellClass += 'bg-gray-100 text-gray-500 ring-2 ring-pink-300 ring-offset-1';
+      } else if (isStudy) {
+        // 勉強した日 → ピンク色付き
+        cellClass += 'bg-pink-200 text-pink-700';
+      } else if (isFuture) {
+        // 未来の日 → 非常に薄く
+        cellClass += 'bg-gray-50 text-gray-300';
+      } else {
+        // 過去で未勉強 → 薄いグレー
+        cellClass += 'bg-gray-100 text-gray-400';
+      }
+
+      cells.push('<div class="' + cellClass + '">' + d + '</div>');
+    }
+
+    gridEl.innerHTML = cells.join('');
+  } catch (e) {
+    console.warn('Calendar fetch error:', e);
   }
 }
 
@@ -2676,6 +2778,7 @@ async function discardShortSessionAndGoHome(sessionId) {
   showPage('page-home');
   fetchAndRenderStats();
   fetchAndRenderStreak();
+  fetchAndRenderCalendar();
 }
 
 // -----------------------------------------------
@@ -3297,6 +3400,7 @@ async function handleRecordSave() {
       showPage('page-home');
       fetchAndRenderStats();
       fetchAndRenderStreak();
+      fetchAndRenderCalendar();
 
     } else {
       if (errEl) {
