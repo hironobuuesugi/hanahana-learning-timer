@@ -2040,6 +2040,28 @@ async function initRankingPage() {
       return;
     }
 
+    // ─── 先生判定 ───
+    var isTeacher = (currentUser && currentUser.user_id === 'hiro0808');
+
+    // ─── 今月Top5の今日コメント有無を事前取得（生徒用表示制御） ───
+    // 先生はすべての生徒にボタン表示するため取得不要
+    // 生徒は今日コメントがある生徒のみボタン表示するため並列取得する
+    var commentedSet = new Set();
+    if (!isTeacher && monthData.ranking.length > 0) {
+      var commentFetches = monthData.ranking.map(function(entry) {
+        if (!entry.user_id) return Promise.resolve(null);
+        return fetch('/api/comments?student_user_id=' + encodeURIComponent(entry.user_id), { credentials: 'include' })
+          .then(function(r) { return r.json(); })
+          .then(function(j) {
+            if (j.success && j.data && j.data.comment) {
+              commentedSet.add(entry.user_id);
+            }
+          })
+          .catch(function() { /* 取得失敗は無視 */ });
+      });
+      await Promise.all(commentFetches);
+    }
+
     // ─── 今週 ───
     renderRankingSection({
       sectionEl:   weekSec,
@@ -2050,6 +2072,8 @@ async function initRankingPage() {
       data:        weekData,
       myId:        myDisplayName,
       periodType:  'week',
+      isTeacher:   isTeacher,
+      commentedSet: commentedSet,
     });
 
     // ─── 今月 ───
@@ -2062,6 +2086,8 @@ async function initRankingPage() {
       data:        monthData,
       myId:        myDisplayName,
       periodType:  'month',
+      isTeacher:   isTeacher,
+      commentedSet: commentedSet,
     });
 
     // ─── 先月 ───
@@ -2074,6 +2100,8 @@ async function initRankingPage() {
       data:        lastMonthData,
       myId:        myDisplayName,
       periodType:  'last_month',
+      isTeacher:   isTeacher,
+      commentedSet: commentedSet,
     });
 
   } catch (e) {
@@ -2102,25 +2130,40 @@ async function initRankingPage() {
 
 // ランキングセクション描画ヘルパー
 function renderRankingSection(opts) {
-  var sectionEl  = opts.sectionEl;
-  var labelEl    = document.getElementById(opts.labelElId);
-  var listEl     = document.getElementById(opts.listElId);
-  var myrankArea = opts.myrankArea;
-  var myrankText = opts.myrankText;
-  var data       = opts.data;
-  var myId       = opts.myId;
+  var sectionEl    = opts.sectionEl;
+  var labelEl      = document.getElementById(opts.labelElId);
+  var listEl       = document.getElementById(opts.listElId);
+  var myrankArea   = opts.myrankArea;
+  var myrankText   = opts.myrankText;
+  var data         = opts.data;
+  var myId         = opts.myId;
+  var isTeacher    = opts.isTeacher || false;
+  var commentedSet = opts.commentedSet || new Set();
 
   if (labelEl) labelEl.textContent = data.period_label;
 
   // ランキング行を描画
   // 今月ランキング(periodType='month')のTop5にのみコメントボタンを表示
+  // 先生(hiro0808): 今月全員にボタン表示（コメント未入力の生徒へも新規入力できるよう）
+  // 生徒: 今月Top5のうち今日コメントが存在する生徒にのみボタン表示
   var isMonth = (opts.periodType === 'month');
   if (listEl) {
     if (data.ranking.length === 0) {
       listEl.innerHTML = '<p class="text-xs text-gray-400 text-center py-3">まだデータがありません</p>';
     } else {
       listEl.innerHTML = data.ranking.map(function(entry) {
-        return buildRankRow(entry, myId, isMonth);
+        // 今月のみコメント表示対象。今週・先月は表示しない
+        var showComment = false;
+        if (isMonth && entry.user_id) {
+          if (isTeacher) {
+            // 先生: Top5全員にボタン表示
+            showComment = true;
+          } else {
+            // 生徒: 今日コメントが存在する生徒のみボタン表示
+            showComment = commentedSet.has(entry.user_id);
+          }
+        }
+        return buildRankRow(entry, myId, showComment);
       }).join('');
     }
   }
