@@ -92,17 +92,17 @@ function formatWeekLabel(monday: Date, sunday: Date): string {
 
 // ─────────────────────────────────────────────────
 // 同率順位を付与するヘルパー
-// input: [{display_name, seconds, today_seconds?}, ...] (seconds 降順ソート済み)
-// output: [{rank, display_name, seconds, today_seconds}, ...]
+// input: [{user_id, display_name, seconds, today_seconds?}, ...] (seconds 降順ソート済み)
+// output: [{rank, user_id, display_name, seconds, today_seconds}, ...]
 // ─────────────────────────────────────────────────
-function assignRanks(rows: { display_name: string; seconds: number; today_seconds?: number }[]) {
-  const result: { rank: number; display_name: string; seconds: number; today_seconds: number }[] = [];
+function assignRanks(rows: { user_id: string; display_name: string; seconds: number; today_seconds?: number }[]) {
+  const result: { rank: number; user_id: string; display_name: string; seconds: number; today_seconds: number }[] = [];
   let rank = 1;
   for (let i = 0; i < rows.length; i++) {
     if (i > 0 && rows[i].seconds < rows[i - 1].seconds) {
       rank = i + 1;
     }
-    result.push({ rank, display_name: rows[i].display_name, seconds: rows[i].seconds, today_seconds: rows[i].today_seconds ?? 0 });
+    result.push({ rank, user_id: rows[i].user_id, display_name: rows[i].display_name, seconds: rows[i].seconds, today_seconds: rows[i].today_seconds ?? 0 });
   }
   return result;
 }
@@ -151,7 +151,8 @@ ranking.get('/', async (c) => {
   // 今日の秒数集計（全ユーザー）— 今日増加分の表示用
   // ─────────────────────────────────────────
   const todayAllRows = await db.prepare(`
-    SELECT COALESCE(u.display_name, u.user_id) AS display_name,
+    SELECT u.user_id,
+           COALESCE(u.display_name, u.user_id) AS display_name,
            COALESCE(SUM(ss.total_seconds), 0) AS today_seconds
     FROM study_sessions ss
     JOIN users u ON u.id = ss.user_id
@@ -159,7 +160,7 @@ ranking.get('/', async (c) => {
       AND ss.subject IS NOT NULL
       AND date(ss.started_at, '+9 hours') = ?
     GROUP BY ss.user_id
-  `).bind(todayStr).all<{ display_name: string; today_seconds: number }>();
+  `).bind(todayStr).all<{ user_id: string; display_name: string; today_seconds: number }>();
 
   // display_name → today_seconds のマップ
   const todayMap: Record<string, number> = {};
@@ -174,7 +175,8 @@ ranking.get('/', async (c) => {
   // 表示名: COALESCE(u.display_name, u.user_id) でフォールバック付き
   // ─────────────────────────────────────────
   const weekAllRows = await db.prepare(`
-    SELECT COALESCE(u.display_name, u.user_id) AS display_name,
+    SELECT u.user_id,
+           COALESCE(u.display_name, u.user_id) AS display_name,
            COALESCE(SUM(ss.total_seconds), 0) AS seconds
     FROM study_sessions ss
     JOIN users u ON u.id = ss.user_id
@@ -184,7 +186,7 @@ ranking.get('/', async (c) => {
       AND date(ss.started_at, '+9 hours') <= ?
     GROUP BY ss.user_id
     ORDER BY seconds DESC
-  `).bind(mondayStr, sundayStr).all<{ display_name: string; seconds: number }>();
+  `).bind(mondayStr, sundayStr).all<{ user_id: string; display_name: string; seconds: number }>();
 
   // today_seconds をマージ
   const weekAll = (weekAllRows.results ?? []).map(r => ({
@@ -214,7 +216,8 @@ ranking.get('/', async (c) => {
   // 表示名: COALESCE(u.display_name, u.user_id) でフォールバック付き
   // ─────────────────────────────────────────
   const monthAllRows = await db.prepare(`
-    SELECT COALESCE(u.display_name, u.user_id) AS display_name,
+    SELECT u.user_id,
+           COALESCE(u.display_name, u.user_id) AS display_name,
            COALESCE(SUM(ss.total_seconds), 0) AS seconds
     FROM study_sessions ss
     JOIN users u ON u.id = ss.user_id
@@ -223,7 +226,7 @@ ranking.get('/', async (c) => {
       AND strftime('%Y-%m', ss.started_at, '+9 hours') = ?
     GROUP BY ss.user_id
     ORDER BY seconds DESC
-  `).bind(monthStr).all<{ display_name: string; seconds: number }>();
+  `).bind(monthStr).all<{ user_id: string; display_name: string; seconds: number }>();
 
   // today_seconds をマージ
   const monthAll = (monthAllRows.results ?? []).map(r => ({
@@ -246,7 +249,8 @@ ranking.get('/', async (c) => {
   const { firstDay, lastDay, lastMonthStr, label: lastMonthLabel } = getLastMonthPeriod();
 
   const lastMonthAllRows = await db.prepare(`
-    SELECT COALESCE(u.display_name, u.user_id) AS display_name,
+    SELECT u.user_id,
+           COALESCE(u.display_name, u.user_id) AS display_name,
            COALESCE(SUM(ss.total_seconds), 0) AS seconds
     FROM study_sessions ss
     JOIN users u ON u.id = ss.user_id
@@ -255,7 +259,7 @@ ranking.get('/', async (c) => {
       AND strftime('%Y-%m', ss.started_at, '+9 hours') = ?
     GROUP BY ss.user_id
     ORDER BY seconds DESC
-  `).bind(lastMonthStr).all<{ display_name: string; seconds: number }>();
+  `).bind(lastMonthStr).all<{ user_id: string; display_name: string; seconds: number }>();
 
   const lastMonthAll    = lastMonthAllRows.results ?? [];
   const lastMonthRanked = assignRanks(lastMonthAll);
@@ -297,7 +301,7 @@ ranking.get('/', async (c) => {
 // 例: 1,1,3,4,5,5 → 全員返す（5位が複数いる場合も含める）
 // 例: 1,2,3,4,5,6 → 1〜5のみ
 // ─────────────────────────────────────────────────
-function getTop5WithTies(ranked: { rank: number; display_name: string; seconds: number }[]) {
+function getTop5WithTies(ranked: { rank: number; user_id: string; display_name: string; seconds: number }[]) {
   return ranked.filter(r => r.rank <= 5);
 }
 

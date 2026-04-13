@@ -12,6 +12,7 @@ import statsRoutes from './routes/stats'
 import recordsRoutes from './routes/records'
 import testdateRoutes from './routes/testdate'
 import rankingRoutes from './routes/ranking'
+import commentsRoutes from './routes/comments'
 import { authMiddleware } from './middleware/auth'
 import type { Bindings, Variables } from './types'
 
@@ -60,6 +61,7 @@ app.route('/api/stats', statsRoutes)
 app.route('/api/records', recordsRoutes)
 app.route('/api/testdate', testdateRoutes)
 app.route('/api/ranking', rankingRoutes)
+app.route('/api/comments', commentsRoutes)
 
 // =============================================
 // フロントエンドページ（SPA形式）
@@ -763,6 +765,75 @@ app.get('*', (c) => {
       </div>
 
     </main>
+  </div>
+</div>
+
+<!-- =============================================
+     先生コメント モーダル（ランキング画面から呼ばれる）
+     ============================================= -->
+<div id="comment-modal-overlay"
+  class="fixed inset-0 bg-black bg-opacity-40 z-50 hidden flex items-center justify-center px-4"
+  onclick="if(event.target===this) closeCommentModal()"
+>
+  <div class="bg-white rounded-2xl shadow-xl w-full max-w-sm p-5">
+    <!-- ヘッダー -->
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="font-bold text-gray-800 text-base flex items-center gap-2">
+        <span>💬</span>
+        <span>先生からのコメント</span>
+      </h3>
+      <button onclick="closeCommentModal()"
+        class="text-gray-400 hover:text-gray-600 text-xl leading-none">&times;</button>
+    </div>
+
+    <!-- 対象生徒名 -->
+    <p class="text-sm text-gray-500 mb-3">
+      <span class="font-medium text-gray-700" id="comment-modal-name"></span> さんへ
+    </p>
+
+    <!-- 既存コメント表示エリア -->
+    <div id="comment-modal-existing" class="mb-4 hidden">
+      <div class="bg-blue-50 border border-blue-100 rounded-xl p-3">
+        <p class="text-xs text-blue-400 font-medium mb-1">今日のコメント</p>
+        <p class="text-sm text-gray-700 leading-relaxed" id="comment-modal-text"></p>
+      </div>
+    </div>
+
+    <!-- コメントなし表示 -->
+    <div id="comment-modal-empty" class="mb-4 hidden">
+      <p class="text-sm text-gray-400 text-center py-2">まだ今日のコメントはありません</p>
+    </div>
+
+    <!-- 先生用入力エリア（hiro0808のみ表示） -->
+    <div id="comment-modal-input-area" class="hidden">
+      <label class="text-xs text-gray-500 font-medium block mb-1">
+        コメントを入力（50文字以内）
+      </label>
+      <textarea
+        id="comment-modal-input"
+        maxlength="50"
+        rows="3"
+        placeholder="コメントを入力してください"
+        class="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-300 focus:ring-1 focus:ring-blue-200 resize-none"
+      ></textarea>
+      <div class="flex items-center justify-between mt-1 mb-3">
+        <p id="comment-modal-err" class="text-xs text-red-500 hidden"></p>
+        <p class="text-xs text-gray-400 ml-auto">
+          <span id="comment-char-count">0</span>/50文字
+        </p>
+      </div>
+      <button
+        id="comment-modal-save-btn"
+        onclick="saveTeacherComment()"
+        class="w-full bg-blue-400 hover:bg-blue-500 text-white text-sm font-bold py-2 rounded-xl transition-colors"
+      >保存する</button>
+      <p id="comment-modal-success" class="text-xs text-green-600 text-center mt-2 hidden">保存しました！</p>
+    </div>
+
+    <!-- 閉じるボタン -->
+    <button onclick="closeCommentModal()"
+      class="w-full mt-3 text-sm text-gray-400 hover:text-gray-600 py-1 transition-colors"
+    >閉じる</button>
   </div>
 </div>
 
@@ -1630,7 +1701,8 @@ function getRankBadgeClass(rank) {
 
 // ランキング行HTMLを生成
 // entry.display_name に表示名を使用（ログインIDは表示しない）
-function buildRankRow(entry, myDisplayName) {
+// showComment: true のとき今月Top5の💬ボタンを表示
+function buildRankRow(entry, myDisplayName, showComment) {
   var isMe = (entry.display_name === myDisplayName);
   var badgeClass = getRankBadgeClass(entry.rank);
   var rowBg = isMe ? 'bg-pink-50 border border-pink-200' : 'bg-gray-50';
@@ -1645,11 +1717,21 @@ function buildRankRow(entry, myDisplayName) {
     var todayStr = todayHour > 0 ? (todayHour + '時間' + (todayRemMin > 0 ? todayRemMin + '分' : '')) : (todayRemMin + '分');
     todayLabel = '<span style="font-size:0.72rem;color:#059669;font-weight:600;margin-left:4px;white-space:nowrap;">+' + todayStr + '</span>';
   }
+  // 💬コメントボタン（今月Top5のみ）
+  var commentBtn = '';
+  if (showComment && entry.user_id) {
+    var uid = escapeHtml(entry.user_id);
+    var dname = escapeHtml(entry.display_name);
+    commentBtn = '<button onclick="openCommentModal(\'' + uid + '\',\'' + dname + '\')" ' +
+      'class="flex-shrink-0 text-base leading-none px-1 py-0.5 rounded hover:bg-blue-50 transition-colors" ' +
+      'title="先生コメント" aria-label="先生コメントを見る">💬</button>';
+  }
   return (
-    '<div class="flex items-center gap-3 rounded-xl px-3 py-2 ' + rowBg + '">' +
+    '<div class="flex items-center gap-2 rounded-xl px-3 py-2 ' + rowBg + '">' +
       '<span class="flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ' + badgeClass + '">' + entry.rank + '</span>' +
       '<span class="flex-1 text-sm text-gray-700 truncate">' + escapeHtml(entry.display_name) + nameLabel + '</span>' +
-      '<span class="text-sm font-bold text-gray-600">' + formatSecondsRanking(entry.seconds) + todayLabel + '</span>' +
+      '<span class="text-sm font-bold text-gray-600 flex-shrink-0">' + formatSecondsRanking(entry.seconds) + todayLabel + '</span>' +
+      commentBtn +
     '</div>'
   );
 }
@@ -1661,6 +1743,150 @@ function escapeHtml(str) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+
+// =============================================
+// 先生コメント モーダル
+// =============================================
+
+// 現在モーダルで対象の生徒 user_id を保持
+var commentModalStudentUserId = '';
+
+// 💬ボタンをクリックしてモーダルを開く
+async function openCommentModal(studentUserId, displayName) {
+  commentModalStudentUserId = studentUserId;
+
+  var overlay   = document.getElementById('comment-modal-overlay');
+  var nameEl    = document.getElementById('comment-modal-name');
+  var existEl   = document.getElementById('comment-modal-existing');
+  var emptyEl   = document.getElementById('comment-modal-empty');
+  var textEl    = document.getElementById('comment-modal-text');
+  var inputArea = document.getElementById('comment-modal-input-area');
+  var inputEl   = document.getElementById('comment-modal-input');
+  var errEl     = document.getElementById('comment-modal-err');
+  var successEl = document.getElementById('comment-modal-success');
+  var charCount = document.getElementById('comment-char-count');
+
+  // 初期化
+  if (nameEl)    nameEl.textContent = displayName;
+  if (existEl)   existEl.classList.add('hidden');
+  if (emptyEl)   emptyEl.classList.add('hidden');
+  if (inputArea) inputArea.classList.add('hidden');
+  if (errEl)     { errEl.textContent = ''; errEl.classList.add('hidden'); }
+  if (successEl) successEl.classList.add('hidden');
+  if (inputEl)   inputEl.value = '';
+  if (charCount) charCount.textContent = '0';
+
+  // モーダルを表示
+  if (overlay) {
+    overlay.classList.remove('hidden');
+    overlay.classList.add('flex');
+  }
+
+  // 先生アカウント判定
+  var isTeacher = (currentUser && currentUser.user_id === 'hiro0808');
+
+  // 当日コメントを取得
+  try {
+    var res  = await fetch('/api/comments?student_user_id=' + encodeURIComponent(studentUserId), { credentials: 'include' });
+    var json = await res.json();
+
+    if (json.success && json.data.comment) {
+      // コメントあり
+      if (textEl)  textEl.textContent = json.data.comment.comment_text;
+      if (existEl) existEl.classList.remove('hidden');
+      // 先生は既存コメントを入力欄に読み込んで編集可能にする
+      if (isTeacher && inputEl) inputEl.value = json.data.comment.comment_text;
+    } else {
+      // コメントなし
+      if (emptyEl) emptyEl.classList.remove('hidden');
+    }
+  } catch (e) {
+    if (emptyEl) emptyEl.classList.remove('hidden');
+  }
+
+  // 先生のみ入力エリアを表示
+  if (isTeacher && inputArea) {
+    inputArea.classList.remove('hidden');
+    // 文字数カウンタを設定
+    if (inputEl && charCount) {
+      charCount.textContent = String(inputEl.value.length);
+      inputEl.oninput = function() {
+        charCount.textContent = String(inputEl.value.length);
+      };
+    }
+  }
+}
+
+// モーダルを閉じる
+function closeCommentModal() {
+  var overlay = document.getElementById('comment-modal-overlay');
+  if (overlay) {
+    overlay.classList.add('hidden');
+    overlay.classList.remove('flex');
+  }
+  commentModalStudentUserId = '';
+}
+
+// コメントを保存する（先生のみ）
+async function saveTeacherComment() {
+  var inputEl   = document.getElementById('comment-modal-input');
+  var errEl     = document.getElementById('comment-modal-err');
+  var successEl = document.getElementById('comment-modal-success');
+  var saveBtn   = document.getElementById('comment-modal-save-btn');
+  var existEl   = document.getElementById('comment-modal-existing');
+  var emptyEl   = document.getElementById('comment-modal-empty');
+  var textEl    = document.getElementById('comment-modal-text');
+
+  if (!inputEl || !commentModalStudentUserId) return;
+
+  var text = inputEl.value.trim();
+
+  // バリデーション
+  if (errEl) { errEl.textContent = ''; errEl.classList.add('hidden'); }
+  if (successEl) successEl.classList.add('hidden');
+
+  if (!text) {
+    if (errEl) { errEl.textContent = 'コメントを入力してください'; errEl.classList.remove('hidden'); }
+    return;
+  }
+  if (text.length > 50) {
+    if (errEl) { errEl.textContent = '50文字以内にしてください'; errEl.classList.remove('hidden'); }
+    return;
+  }
+
+  if (saveBtn) saveBtn.disabled = true;
+
+  try {
+    var res = await fetch('/api/comments', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        student_user_id: commentModalStudentUserId,
+        comment_text:    text,
+      }),
+    });
+    var json = await res.json();
+
+    if (json.success) {
+      // 表示を更新
+      if (textEl)  textEl.textContent = text;
+      if (existEl) existEl.classList.remove('hidden');
+      if (emptyEl) emptyEl.classList.add('hidden');
+      if (successEl) successEl.classList.remove('hidden');
+      // 3秒後に成功メッセージを消す
+      setTimeout(function() {
+        if (successEl) successEl.classList.add('hidden');
+      }, 3000);
+    } else {
+      if (errEl) { errEl.textContent = json.error || '保存に失敗しました'; errEl.classList.remove('hidden'); }
+    }
+  } catch (e) {
+    if (errEl) { errEl.textContent = '通信エラーが発生しました'; errEl.classList.remove('hidden'); }
+  } finally {
+    if (saveBtn) saveBtn.disabled = false;
+  }
 }
 
 // ランキングページ初期化（ページ遷移時に呼ばれる）
@@ -1766,12 +1992,14 @@ function renderRankingSection(opts) {
   if (labelEl) labelEl.textContent = data.period_label;
 
   // ランキング行を描画
+  // 今月ランキング(periodType='month')のTop5にのみコメントボタンを表示
+  var isMonth = (opts.periodType === 'month');
   if (listEl) {
     if (data.ranking.length === 0) {
       listEl.innerHTML = '<p class="text-xs text-gray-400 text-center py-3">まだデータがありません</p>';
     } else {
       listEl.innerHTML = data.ranking.map(function(entry) {
-        return buildRankRow(entry, myId);
+        return buildRankRow(entry, myId, isMonth);
       }).join('');
     }
   }
