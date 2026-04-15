@@ -66,6 +66,9 @@ async function buildTimerState(db: D1Database, session: StudySessionRecord): Pro
 // 合計勉強秒数を計算するヘルパー
 // 開始〜終了 の時間から 一時停止時間の合計 を引く
 // =============================================
+// 90分 = 5400秒 を上限とする定数
+const MAX_STUDY_SECONDS = 5400;
+
 function calcTotalSeconds(
   startedAt: string,
   finishedAt: string,
@@ -85,7 +88,11 @@ function calcTotalSeconds(
     // resume_at が null のものは呼び出し元で閉じてから渡す
   }
 
-  return Math.max(0, totalElapsed - pausedSeconds);
+  const raw = Math.max(0, totalElapsed - pausedSeconds);
+  // 90分（5400秒）を超えた場合は 5400秒 に打ち切る
+  // iPhone スリープ中にタイマーが止まっても、復帰後に実経過時間が
+  // 90分を超えていれば必ず 90分記録になるようにする
+  return Math.min(raw, MAX_STUDY_SECONDS);
 }
 
 // =============================================

@@ -2728,8 +2728,19 @@ async function initTimerPage() {
     // ※ 真のページ離脱（タブ/ブラウザを閉じる）は pagehide → sendBeacon で
     //    frozen 状態になるため、次回アクセス時は上の frozen ブランチで処理される。
     timerState = serverState;
-    renderTimerUI();
-    startTimerTick();
+
+    // ── iPhone スリープ / 非アクティブ復帰時の 90分超えチェック ──
+    // calcElapsedSeconds は MAX_STUDY_SECONDS(5400) で上限打ち切り済みのため、
+    // ここで >= 5400 なら「復帰時点で既に90分超え」→ 即自動停止を走らせる
+    var elapsedOnReturn = calcElapsedSeconds(serverState);
+    if (elapsedOnReturn >= MAX_STUDY_SECONDS && !timerAutoStopTriggered) {
+      timerAutoStopTriggered = true;
+      renderTimerUI();
+      await handleTimerAutoStop();
+    } else {
+      renderTimerUI();
+      startTimerTick();
+    }
 
   } else {
     // ─── セッションなし / 終了済み → 通常の待機状態 ───
@@ -2911,8 +2922,8 @@ function startTimerTick() {
     const under5El = document.getElementById('timer-under5min');
     if (under5El) { elapsed < 300 ? under5El.classList.remove('hidden') : under5El.classList.add('hidden'); }
     const warn60El = document.getElementById('timer-60min-warning');
-    if (warn60El) { (elapsed >= 3600 && elapsed < 5400) ? warn60El.classList.remove('hidden') : warn60El.classList.add('hidden'); }
-    if (elapsed >= 5400 && !timerAutoStopTriggered) { timerAutoStopTriggered = true; await handleTimerAutoStop(); }
+    if (warn60El) { (elapsed >= 3600 && elapsed < MAX_STUDY_SECONDS) ? warn60El.classList.remove('hidden') : warn60El.classList.add('hidden'); }
+    if (elapsed >= MAX_STUDY_SECONDS && !timerAutoStopTriggered) { timerAutoStopTriggered = true; await handleTimerAutoStop(); }
   })();
 
   timerIntervalId = setInterval(async () => {
@@ -2937,15 +2948,15 @@ function startTimerTick() {
     // ── 60分警告（60分 = 3600秒）～90分手前まで表示 ──
     const warn60El = document.getElementById('timer-60min-warning');
     if (warn60El) {
-      if (elapsed >= 3600 && elapsed < 5400) {
+      if (elapsed >= 3600 && elapsed < MAX_STUDY_SECONDS) {
         warn60El.classList.remove('hidden');
       } else {
         warn60El.classList.add('hidden');
       }
     }
 
-    // ── 90分自動停止（90分 = 5400秒） ──
-    if (elapsed >= 5400 && !timerAutoStopTriggered) {
+    // ── 90分自動停止（90分 = MAX_STUDY_SECONDS 秒） ──
+    if (elapsed >= MAX_STUDY_SECONDS && !timerAutoStopTriggered) {
       timerAutoStopTriggered = true;
       await handleTimerAutoStop();
     }
@@ -3010,6 +3021,9 @@ function stopTimerTick() {
 // ※ frozen 状態では total_seconds が確定値として保存済みのため
 //    この関数は frozen では呼ばない（呼んでも 0 を返すように設計）
 // -----------------------------------------------
+// 90分 = 5400秒 の上限定数（バックエンドと同値）
+var MAX_STUDY_SECONDS = 5400;
+
 function calcElapsedSeconds(state) {
   if (!state) return 0;
   // frozen / finished は total_seconds をそのまま使う
@@ -3028,7 +3042,10 @@ function calcElapsedSeconds(state) {
     elapsed -= Math.floor((resumeMs - pauseMs) / 1000);
   }
 
-  return Math.max(0, elapsed);
+  // 90分（5400秒）を上限とする
+  // iPhoneスリープ復帰後など、実経過時間が90分を超えていても
+  // フロント表示・自動停止判定ともに 90分 で打ち切る
+  return Math.min(Math.max(0, elapsed), MAX_STUDY_SECONDS);
 }
 
 // -----------------------------------------------
