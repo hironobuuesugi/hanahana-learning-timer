@@ -182,7 +182,7 @@ admin.get('/student/:studentUserId/stats', async (c) => {
         month_seconds: stats?.month_seconds ?? 0,
         total_seconds: stats?.total_seconds ?? 0,
       },
-      streak: { current: streak, best: bestStreak },
+      streak: { current: currentStreak, best: bestStreak },
     }
   })
 })
