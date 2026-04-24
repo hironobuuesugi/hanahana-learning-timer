@@ -3857,7 +3857,7 @@ async function loadAdminStudent(studentUserId) {
       if (avEl)   avEl.textContent   = st.display_name.charAt(0);
       if (creEl && st.created_at) {
         creEl.textContent = new Date(st.created_at)
-          .toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' });
+          .toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo', year: 'numeric', month: 'long', day: 'numeric' });
       }
 
       // ── 勉強時間 ──
@@ -3914,9 +3914,9 @@ async function loadAdminStudent(studentUserId) {
     if (sessEl) {
       if (sessJson.success && sessJson.data.length > 0) {
         sessEl.innerHTML = sessJson.data.map(function(s) {
-          var jst = new Date(new Date(s.started_at).getTime() + 9*60*60*1000);
-          var dateStr = jst.toLocaleDateString('ja-JP', { month:'numeric', day:'numeric' });
-          var timeStr = jst.toLocaleTimeString('ja-JP', { hour:'2-digit', minute:'2-digit' });
+          var _d = new Date(s.started_at);
+          var dateStr = _d.toLocaleDateString('ja-JP', { timeZone:'Asia/Tokyo', month:'numeric', day:'numeric' });
+          var timeStr = _d.toLocaleTimeString('ja-JP', { timeZone:'Asia/Tokyo', hour:'2-digit', minute:'2-digit' });
           var dur = formatSecondsJaShort(s.total_seconds);
           var autoTag = s.auto_stopped ? '<span class="text-xs text-amber-500 ml-1">自動停止</span>' : '';
           // 複数教科（カンマ区切り）に対応
@@ -4003,9 +4003,9 @@ async function loadAdminStudent(studentUserId) {
           // SQLite datetime('now') は "YYYY-MM-DD HH:MM:SS" 形式でUTC保存
           // Tに置換してUTCとしてパースし、+9時間でJSTに変換
           var raw = (l.logged_in_at || '').replace(' ', 'T') + 'Z';
-          var jst = new Date(new Date(raw).getTime() + 9*60*60*1000);
-          var str = jst.toLocaleDateString('ja-JP', { year:'numeric', month:'numeric', day:'numeric' })
-            + ' ' + jst.toLocaleTimeString('ja-JP', { hour:'2-digit', minute:'2-digit' });
+          var _ld = new Date(raw);
+          var str = _ld.toLocaleDateString('ja-JP', { timeZone:'Asia/Tokyo', year:'numeric', month:'numeric', day:'numeric' })
+            + ' ' + _ld.toLocaleTimeString('ja-JP', { timeZone:'Asia/Tokyo', hour:'2-digit', minute:'2-digit' });
           return '<div class="flex items-center gap-2 py-1.5 border-b border-gray-50 last:border-0">'
             + '<i class="fas fa-circle text-green-300 text-xs"></i>'
             + '<span class="text-xs text-gray-600">' + str + '</span>'
