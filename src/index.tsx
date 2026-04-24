@@ -13,6 +13,7 @@ import recordsRoutes from './routes/records'
 import testdateRoutes from './routes/testdate'
 import rankingRoutes from './routes/ranking'
 import commentsRoutes from './routes/comments'
+import adminRoutes from './routes/admin'
 import { authMiddleware } from './middleware/auth'
 import type { Bindings, Variables } from './types'
 
@@ -62,6 +63,7 @@ app.route('/api/records', recordsRoutes)
 app.route('/api/testdate', testdateRoutes)
 app.route('/api/ranking', rankingRoutes)
 app.route('/api/comments', commentsRoutes)
+app.route('/api/admin', adminRoutes)
 
 // =============================================
 // フロントエンドページ（SPA形式）
@@ -592,6 +594,22 @@ app.get('*', (c) => {
 
         </div>
 
+        <!-- 先生用管理画面ボタン（hiro0808のみ表示） -->
+        <div id="admin-menu-card" class="hidden mt-3">
+          <div
+            class="card p-4 cursor-pointer hover:shadow-md transition-shadow border-2 border-indigo-100 hover:border-indigo-300 bg-gradient-to-br from-indigo-50 to-purple-50"
+            onclick="showPage('page-admin'); initAdminPage()"
+          >
+            <div class="flex items-center gap-3">
+              <div class="text-3xl">👩‍🏫</div>
+              <div>
+                <p class="font-medium text-gray-700 text-sm">先生管理画面</p>
+                <p class="text-xs text-indigo-400 mt-0.5 font-medium">生徒の学習状況を確認→</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- ガチャ結果表示エリア（ガチャを引いたときだけ表示） -->
         <div id="gacha-result-area" class="hidden mt-4">
           <div class="bg-gradient-to-br from-yellow-50 to-orange-50 border-2 border-yellow-200 rounded-2xl p-5">
@@ -856,6 +874,146 @@ app.get('*', (c) => {
     <button onclick="closeCommentModal()"
       class="w-full mt-3 text-sm text-gray-400 hover:text-gray-600 py-1 transition-colors"
     >閉じる</button>
+  </div>
+</div>
+
+<!-- =============================================
+     ページ7: 先生用管理画面（hiro0808 のみ表示）
+     ============================================= -->
+<div id="page-admin" class="page">
+  <div class="min-h-screen bg-gray-50">
+
+    <!-- ヘッダー -->
+    <header class="bg-white shadow-sm sticky top-0 z-10">
+      <div class="max-w-2xl mx-auto px-4 py-3 flex items-center justify-between">
+        <button
+          onclick="showPage('page-home')"
+          class="text-gray-500 hover:text-gray-700 flex items-center gap-1 transition-colors"
+        >
+          <i class="fas fa-chevron-left"></i>
+          <span class="text-sm">ホーム</span>
+        </button>
+        <span class="font-bold text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-purple-500 text-sm">
+          👩‍🏫 先生管理画面
+        </span>
+        <div class="w-16"></div>
+      </div>
+    </header>
+
+    <main class="max-w-2xl mx-auto px-4 py-6">
+
+      <!-- 生徒セレクター -->
+      <div class="bg-white rounded-2xl shadow-sm p-4 mb-5">
+        <label class="block text-sm font-medium text-gray-600 mb-2">
+          <i class="fas fa-user-graduate text-indigo-400 mr-1"></i>
+          生徒を選んでください
+        </label>
+        <select
+          id="admin-student-select"
+          onchange="loadAdminStudent(this.value)"
+          class="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-300 bg-white"
+        >
+          <option value="">-- 生徒を選択 --</option>
+        </select>
+      </div>
+
+      <!-- ローディング -->
+      <div id="admin-loading" class="hidden text-center py-10">
+        <div class="inline-block w-8 h-8 border-4 border-indigo-200 border-t-indigo-400 rounded-full animate-spin mb-3"></div>
+        <p class="text-sm text-gray-400">読み込み中...</p>
+      </div>
+
+      <!-- 生徒詳細エリア（選択後に表示） -->
+      <div id="admin-student-detail" class="hidden space-y-4">
+
+        <!-- 生徒情報ヘッダー -->
+        <div class="bg-gradient-to-br from-indigo-50 to-purple-50 rounded-2xl p-4 flex items-center gap-4">
+          <div class="w-12 h-12 rounded-full bg-gradient-to-br from-indigo-400 to-purple-400 flex items-center justify-center text-white text-xl font-bold shadow">
+            <span id="admin-student-avatar">?</span>
+          </div>
+          <div>
+            <p class="font-bold text-gray-800 text-base" id="admin-student-name">-</p>
+            <p class="text-xs text-gray-500 font-mono" id="admin-student-userid">-</p>
+            <p class="text-xs text-gray-400 mt-0.5">登録日: <span id="admin-student-created">-</span></p>
+          </div>
+        </div>
+
+        <!-- 勉強時間集計 -->
+        <div class="bg-white rounded-2xl shadow-sm p-4">
+          <h3 class="text-sm font-medium text-gray-500 mb-3 flex items-center gap-2">
+            <i class="fas fa-chart-bar text-indigo-400"></i>
+            勉強時間
+          </h3>
+          <div class="bg-indigo-50 border border-indigo-200 rounded-xl p-3 mb-3 text-center">
+            <p class="text-xs text-indigo-500 font-semibold mb-1">🔥 今日</p>
+            <p class="text-2xl font-bold text-indigo-600" id="admin-stats-today">--</p>
+          </div>
+          <div class="grid grid-cols-3 gap-2">
+            <div class="bg-purple-50 rounded-xl p-3 text-center">
+              <p class="text-xs text-purple-400 font-medium mb-1">今週</p>
+              <p class="text-base font-bold text-purple-600" id="admin-stats-week">--</p>
+            </div>
+            <div class="bg-blue-50 rounded-xl p-3 text-center">
+              <p class="text-xs text-blue-400 font-medium mb-1">今月</p>
+              <p class="text-base font-bold text-blue-600" id="admin-stats-month">--</p>
+            </div>
+            <div class="bg-green-50 rounded-xl p-3 text-center">
+              <p class="text-xs text-green-500 font-medium mb-1">累計</p>
+              <p class="text-base font-bold text-green-600" id="admin-stats-total">--</p>
+            </div>
+          </div>
+          <!-- 連続記録 -->
+          <div class="mt-3 flex items-center justify-between bg-orange-50 rounded-xl px-4 py-2">
+            <div class="flex items-center gap-2">
+              <span class="text-base">🔥</span>
+              <span class="text-xs font-medium text-orange-700">連続記録</span>
+            </div>
+            <div class="text-right">
+              <span class="text-sm font-bold text-orange-600" id="admin-streak-current">--</span>
+              <span class="text-xs text-orange-400 ml-1">（自己ベスト: <span id="admin-streak-best">--</span>）</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 今月カレンダー -->
+        <div class="bg-white rounded-2xl shadow-sm p-4">
+          <h3 class="text-sm font-medium text-gray-500 mb-3 flex items-center gap-2">
+            <i class="fas fa-calendar text-indigo-400"></i>
+            今月の勉強カレンダー
+          </h3>
+          <div id="admin-calendar" class="text-sm text-gray-400 text-center py-4">読み込み中...</div>
+        </div>
+
+        <!-- 今月・教科別時間 -->
+        <div class="bg-white rounded-2xl shadow-sm p-4">
+          <h3 class="text-sm font-medium text-gray-500 mb-3 flex items-center gap-2">
+            <i class="fas fa-book text-indigo-400"></i>
+            今月の教科別勉強時間
+          </h3>
+          <div id="admin-subjects" class="space-y-2 text-sm text-gray-400">読み込み中...</div>
+        </div>
+
+        <!-- 直近セッション -->
+        <div class="bg-white rounded-2xl shadow-sm p-4">
+          <h3 class="text-sm font-medium text-gray-500 mb-3 flex items-center gap-2">
+            <i class="fas fa-history text-indigo-400"></i>
+            直近の勉強セッション
+          </h3>
+          <div id="admin-sessions" class="space-y-2 text-sm text-gray-400">読み込み中...</div>
+        </div>
+
+        <!-- ログイン履歴 -->
+        <div class="bg-white rounded-2xl shadow-sm p-4">
+          <h3 class="text-sm font-medium text-gray-500 mb-3 flex items-center gap-2">
+            <i class="fas fa-sign-in-alt text-indigo-400"></i>
+            ログイン履歴（直近20件）
+          </h3>
+          <div id="admin-logins" class="space-y-1 text-sm text-gray-400">読み込み中...</div>
+        </div>
+
+      </div>
+
+    </main>
   </div>
 </div>
 
@@ -1520,6 +1678,16 @@ function updateHomeScreen(user) {
   fetchTestDate();
   // 今月の自動停止回数を取得して表示
   fetchAndRenderAutoStopCount();
+
+  // 先生アカウント(hiro0808)のみ管理画面ボタンを表示
+  var adminCard = document.getElementById('admin-menu-card');
+  if (adminCard) {
+    if (user.user_id === 'hiro0808') {
+      adminCard.classList.remove('hidden');
+    } else {
+      adminCard.classList.add('hidden');
+    }
+  }
 }
 
 // フォームタグのonsubmitでEnterキー送信をハンドリング済み
@@ -3590,6 +3758,253 @@ function freezeOnLeave() {
 //   別タブへの移動では発火しないため、別タブ移動で誤って凍結しない。
 //   （visibilitychange は別タブ移動でも hidden になるため使用しない）
 window.addEventListener('pagehide', freezeOnLeave);
+
+// =============================================
+// 先生用管理画面 - JS処理
+// =============================================
+
+// 教科名の日本語マッピング
+var SUBJECT_LABELS_ADMIN = {
+  math:    '数学',
+  english: '英語',
+  japanese:'国語',
+  science: '理科',
+  social:  '社会',
+  other:   'その他',
+};
+
+function adminSubjectLabel(s) {
+  return SUBJECT_LABELS_ADMIN[s] || s || 'その他';
+}
+
+// 管理画面初期化：生徒リストを取得してセレクターに設定
+async function initAdminPage() {
+  var select = document.getElementById('admin-student-select');
+  var detail = document.getElementById('admin-student-detail');
+  var loading = document.getElementById('admin-loading');
+  if (!select) return;
+
+  // リセット
+  select.innerHTML = '<option value="">-- 生徒を選択 --</option>';
+  if (detail) detail.classList.add('hidden');
+
+  try {
+    var res = await fetch('/api/admin/students', { credentials: 'include' });
+    var json = await res.json();
+    if (!json.success) return;
+
+    json.data.forEach(function(s) {
+      var opt = document.createElement('option');
+      opt.value = s.user_id;
+      opt.textContent = s.display_name + '（' + s.user_id + '）';
+      select.appendChild(opt);
+    });
+  } catch(e) {
+    console.error('admin students fetch error', e);
+  }
+}
+
+// 生徒を選択したときにデータを読み込む
+async function loadAdminStudent(studentUserId) {
+  var detail = document.getElementById('admin-student-detail');
+  var loading = document.getElementById('admin-loading');
+  if (!detail || !loading) return;
+
+  if (!studentUserId) {
+    detail.classList.add('hidden');
+    return;
+  }
+
+  detail.classList.add('hidden');
+  loading.classList.remove('hidden');
+
+  try {
+    // 並列で全データ取得
+    var [statsRes, calRes, subRes, sessRes, loginRes] = await Promise.all([
+      fetch('/api/admin/student/' + studentUserId + '/stats',    { credentials: 'include' }),
+      fetch('/api/admin/student/' + studentUserId + '/calendar', { credentials: 'include' }),
+      fetch('/api/admin/student/' + studentUserId + '/subjects', { credentials: 'include' }),
+      fetch('/api/admin/student/' + studentUserId + '/sessions', { credentials: 'include' }),
+      fetch('/api/admin/student/' + studentUserId + '/logins',   { credentials: 'include' }),
+    ]);
+
+    var [statsJson, calJson, subJson, sessJson, loginJson] = await Promise.all([
+      statsRes.json(), calRes.json(), subRes.json(), sessRes.json(), loginRes.json(),
+    ]);
+
+    loading.classList.add('hidden');
+    detail.classList.remove('hidden');
+
+    // ── 生徒情報ヘッダー ──
+    if (statsJson.success) {
+      var st = statsJson.data.student;
+      var nameEl = document.getElementById('admin-student-name');
+      var uidEl  = document.getElementById('admin-student-userid');
+      var creEl  = document.getElementById('admin-student-created');
+      var avEl   = document.getElementById('admin-student-avatar');
+      if (nameEl) nameEl.textContent = st.display_name;
+      if (uidEl)  uidEl.textContent  = '@' + st.user_id;
+      if (avEl)   avEl.textContent   = st.display_name.charAt(0);
+      if (creEl && st.created_at) {
+        creEl.textContent = new Date(st.created_at)
+          .toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' });
+      }
+
+      // ── 勉強時間 ──
+      var d = statsJson.data.stats;
+      var todayEl = document.getElementById('admin-stats-today');
+      var weekEl  = document.getElementById('admin-stats-week');
+      var monEl   = document.getElementById('admin-stats-month');
+      var totEl   = document.getElementById('admin-stats-total');
+      if (todayEl) todayEl.textContent = formatSecondsJaShort(d.today_seconds);
+      if (weekEl)  weekEl.textContent  = formatSecondsJaShort(d.week_seconds);
+      if (monEl)   monEl.textContent   = formatSecondsJaShort(d.month_seconds);
+      if (totEl)   totEl.textContent   = formatSecondsJaShort(d.total_seconds);
+
+      // ── 連続記録 ──
+      var streak = statsJson.data.streak;
+      var curEl  = document.getElementById('admin-streak-current');
+      var bestEl = document.getElementById('admin-streak-best');
+      if (curEl)  curEl.textContent  = streak.current + '日';
+      if (bestEl) bestEl.textContent = streak.best + '日';
+    }
+
+    // ── カレンダー ──
+    var calEl = document.getElementById('admin-calendar');
+    if (calEl) {
+      if (calJson.success) {
+        renderAdminCalendar(calEl, calJson.data);
+      } else {
+        calEl.textContent = 'データを取得できませんでした';
+      }
+    }
+
+    // ── 教科別 ──
+    var subEl = document.getElementById('admin-subjects');
+    if (subEl) {
+      if (subJson.success && subJson.data.length > 0) {
+        var totalSub = subJson.data.reduce(function(a, r) { return a + r.seconds; }, 0);
+        subEl.innerHTML = subJson.data.map(function(r) {
+          var pct = totalSub > 0 ? Math.round(r.seconds / totalSub * 100) : 0;
+          return '<div class="flex items-center gap-2">'
+            + '<span class="w-14 text-xs text-gray-600 font-medium shrink-0">' + adminSubjectLabel(r.subject) + '</span>'
+            + '<div class="flex-1 bg-gray-100 rounded-full h-2">'
+            +   '<div class="bg-indigo-400 h-2 rounded-full" style="width:' + pct + '%"></div>'
+            + '</div>'
+            + '<span class="text-xs text-gray-500 w-16 text-right shrink-0">' + formatSecondsJaShort(r.seconds) + '</span>'
+            + '</div>';
+        }).join('');
+      } else {
+        subEl.textContent = '今月の記録はありません';
+      }
+    }
+
+    // ── セッション一覧 ──
+    var sessEl = document.getElementById('admin-sessions');
+    if (sessEl) {
+      if (sessJson.success && sessJson.data.length > 0) {
+        sessEl.innerHTML = sessJson.data.map(function(s) {
+          var jst = new Date(new Date(s.started_at).getTime() + 9*60*60*1000);
+          var dateStr = jst.toLocaleDateString('ja-JP', { month:'numeric', day:'numeric' });
+          var timeStr = jst.toLocaleTimeString('ja-JP', { hour:'2-digit', minute:'2-digit' });
+          var dur = formatSecondsJaShort(s.total_seconds);
+          var autoTag = s.auto_stopped ? '<span class="text-xs text-amber-500 ml-1">自動停止</span>' : '';
+          return '<div class="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0">'
+            + '<div>'
+            +   '<span class="text-xs text-gray-400">' + dateStr + ' ' + timeStr + '</span>'
+            +   '<span class="ml-2 text-xs font-medium text-gray-700">' + adminSubjectLabel(s.subject) + '</span>'
+            +   autoTag
+            + '</div>'
+            + '<span class="text-xs font-bold text-indigo-600">' + dur + '</span>'
+            + '</div>';
+        }).join('');
+      } else {
+        sessEl.textContent = '記録がありません';
+      }
+    }
+
+    // ── ログイン履歴 ──
+    var loginEl = document.getElementById('admin-logins');
+    if (loginEl) {
+      if (loginJson.success && loginJson.data.length > 0) {
+        loginEl.innerHTML = loginJson.data.map(function(l) {
+          var jst = new Date(new Date(l.created_at).getTime() + 9*60*60*1000);
+          var str = jst.toLocaleDateString('ja-JP', { month:'numeric', day:'numeric' })
+            + ' ' + jst.toLocaleTimeString('ja-JP', { hour:'2-digit', minute:'2-digit' });
+          return '<div class="flex items-center gap-2 py-1 border-b border-gray-50 last:border-0">'
+            + '<i class="fas fa-circle text-green-300 text-xs"></i>'
+            + '<span class="text-xs text-gray-600">' + str + ' ログイン</span>'
+            + '</div>';
+        }).join('');
+      } else {
+        loginEl.textContent = 'ログイン履歴がありません';
+      }
+    }
+
+  } catch(e) {
+    console.error('loadAdminStudent error', e);
+    loading.classList.add('hidden');
+  }
+}
+
+// 管理画面用カレンダー描画
+function renderAdminCalendar(container, studyDates) {
+  var nowJST   = new Date(Date.now() + 9*60*60*1000);
+  var year     = nowJST.getUTCFullYear();
+  var month    = nowJST.getUTCMonth(); // 0-based
+  var todayD   = nowJST.getUTCDate();
+
+  var firstDay = new Date(Date.UTC(year, month, 1));
+  var lastDay  = new Date(Date.UTC(year, month + 1, 0));
+  var startDow = firstDay.getUTCDay(); // 0=Sun
+  // 月曜始まりに変換
+  var offset   = startDow === 0 ? 6 : startDow - 1;
+
+  var studySet = new Set(studyDates);
+  var monthStr = year + '-' + String(month + 1).padStart(2, '0');
+
+  var html = '<div class="text-xs font-medium text-gray-500 mb-2 text-center">'
+    + year + '年' + (month + 1) + '月</div>';
+  html += '<div class="grid grid-cols-7 gap-1 text-center">';
+
+  // 曜日ヘッダー
+  ['月','火','水','木','金','土','日'].forEach(function(d, i) {
+    var cls = i === 5 ? 'text-blue-400' : i === 6 ? 'text-red-400' : 'text-gray-400';
+    html += '<div class="text-xs font-medium ' + cls + ' py-1">' + d + '</div>';
+  });
+
+  // 空白セル
+  for (var i = 0; i < offset; i++) {
+    html += '<div></div>';
+  }
+
+  // 日付セル
+  for (var d = 1; d <= lastDay.getUTCDate(); d++) {
+    var dateStr = monthStr + '-' + String(d).padStart(2, '0');
+    var studied = studySet.has(dateStr);
+    var isToday = d === todayD;
+    var dow     = (offset + d - 1) % 7; // 0=月,...,5=土,6=日
+
+    var cls = 'rounded-full w-7 h-7 flex items-center justify-center mx-auto text-xs ';
+    if (studied && isToday) {
+      cls += 'bg-indigo-500 text-white font-bold ring-2 ring-indigo-300';
+    } else if (studied) {
+      cls += 'bg-indigo-100 text-indigo-700 font-bold';
+    } else if (isToday) {
+      cls += 'ring-2 ring-gray-300 text-gray-700 font-bold';
+    } else if (dow === 5) {
+      cls += 'text-blue-400';
+    } else if (dow === 6) {
+      cls += 'text-red-400';
+    } else {
+      cls += 'text-gray-400';
+    }
+    html += '<div><div class="' + cls + '">' + d + '</div></div>';
+  }
+
+  html += '</div>';
+  container.innerHTML = html;
+}
 </script>
 </body>
 </html>`)
