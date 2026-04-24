@@ -201,6 +201,7 @@ admin.get('/student/:studentUserId/calendar', async (c) => {
 // =============================================
 // GET /api/admin/student/:studentUserId/subjects
 // 特定生徒の今月・教科別勉強時間
+// 複数教科選択時は total_seconds を教科数で均等按分（stats.ts と同仕様）
 // =============================================
 admin.get('/student/:studentUserId/subjects', async (c) => {
   const db = c.env.DB
@@ -215,21 +216,41 @@ admin.get('/student/:studentUserId/subjects', async (c) => {
   }
 
   const nowJST = new Date(Date.now() + 9 * 60 * 60 * 1000)
-  const monthStartJST = nowJST.toISOString().slice(0, 7) + '-01'
+  const monthStr = nowJST.toISOString().slice(0, 7) // YYYY-MM
 
+  // 今月の全セッションを取得（subject・total_seconds のみ）
   const rows = await db.prepare(`
-    SELECT
-      COALESCE(subject, 'other') AS subject,
-      SUM(total_seconds) AS seconds
+    SELECT subject, total_seconds
     FROM study_sessions
     WHERE user_id = ?
       AND status = 'finished'
-      AND date(started_at, '+9 hours') >= ?
-    GROUP BY subject
-    ORDER BY seconds DESC
-  `).bind(student.id, monthStartJST).all<{ subject: string; seconds: number }>()
+      AND subject IS NOT NULL
+      AND strftime('%Y-%m', started_at, '+9 hours') = ?
+  `).bind(student.id, monthStr).all<{ subject: string; total_seconds: number }>()
 
-  return c.json({ success: true, data: rows.results })
+  // stats.ts と同じ按分ロジック
+  const KNOWN_SUBJECTS = ['english', 'math', 'japanese', 'science', 'social', 'other']
+  const acc: Record<string, number> = {
+    english: 0, math: 0, japanese: 0, science: 0, social: 0, other: 0,
+  }
+
+  for (const row of rows.results ?? []) {
+    const codes = row.subject.split(',').map((s: string) => s.trim()).filter(Boolean)
+    if (codes.length === 0) continue
+    const share = row.total_seconds / codes.length
+    for (const code of codes) {
+      const key = KNOWN_SUBJECTS.includes(code) ? code : 'other'
+      acc[key] += share
+    }
+  }
+
+  // 0秒の教科は除外してリスト形式で返す（表示順固定）
+  const ORDER = ['english', 'math', 'japanese', 'science', 'social', 'other']
+  const result = ORDER
+    .map(code => ({ subject: code, seconds: Math.floor(acc[code]) }))
+    .filter(r => r.seconds > 0)
+
+  return c.json({ success: true, data: result })
 })
 
 // =============================================
@@ -250,15 +271,17 @@ admin.get('/student/:studentUserId/sessions', async (c) => {
   }
 
   const rows = await db.prepare(`
-    SELECT id, subject, started_at, finished_at, total_seconds, status, auto_stopped
+    SELECT id, subject, memo, started_at, finished_at, total_seconds, status, auto_stopped
     FROM study_sessions
     WHERE user_id = ?
       AND status = 'finished'
+      AND subject IS NOT NULL
     ORDER BY started_at DESC
     LIMIT ?
   `).bind(student.id, limit).all<{
     id: number
     subject: string | null
+    memo: string | null
     started_at: string
     finished_at: string
     total_seconds: number
@@ -271,7 +294,8 @@ admin.get('/student/:studentUserId/sessions', async (c) => {
 
 // =============================================
 // GET /api/admin/student/:studentUserId/logins
-// 特定生徒のログイン履歴（直近20件）
+// 特定生徒のログイン履歴（直近30件）
+// login_logs テーブルから取得
 // =============================================
 admin.get('/student/:studentUserId/logins', async (c) => {
   const db = c.env.DB
@@ -286,12 +310,12 @@ admin.get('/student/:studentUserId/logins', async (c) => {
   }
 
   const rows = await db.prepare(`
-    SELECT created_at, expires_at
-    FROM sessions
+    SELECT logged_in_at
+    FROM login_logs
     WHERE user_id = ?
-    ORDER BY created_at DESC
-    LIMIT 20
-  `).bind(student.id).all<{ created_at: string; expires_at: string }>()
+    ORDER BY logged_in_at DESC
+    LIMIT 30
+  `).bind(student.id).all<{ logged_in_at: string }>()
 
   return c.json({ success: true, data: rows.results })
 })

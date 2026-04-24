@@ -1002,6 +1002,15 @@ app.get('*', (c) => {
           <div id="admin-sessions" class="space-y-2 text-sm text-gray-400">読み込み中...</div>
         </div>
 
+        <!-- 今月ランキング順位 -->
+        <div class="bg-white rounded-2xl shadow-sm p-4">
+          <h3 class="text-sm font-medium text-gray-500 mb-3 flex items-center gap-2">
+            <i class="fas fa-trophy text-yellow-400"></i>
+            ランキング（今週・今月）
+          </h3>
+          <div id="admin-ranking" class="space-y-2 text-sm text-gray-400">読み込み中...</div>
+        </div>
+
         <!-- ログイン履歴 -->
         <div class="bg-white rounded-2xl shadow-sm p-4">
           <h3 class="text-sm font-medium text-gray-500 mb-3 flex items-center gap-2">
@@ -3820,16 +3829,17 @@ async function loadAdminStudent(studentUserId) {
 
   try {
     // 並列で全データ取得
-    var [statsRes, calRes, subRes, sessRes, loginRes] = await Promise.all([
+    var [statsRes, calRes, subRes, sessRes, loginRes, rankingRes] = await Promise.all([
       fetch('/api/admin/student/' + studentUserId + '/stats',    { credentials: 'include' }),
       fetch('/api/admin/student/' + studentUserId + '/calendar', { credentials: 'include' }),
       fetch('/api/admin/student/' + studentUserId + '/subjects', { credentials: 'include' }),
       fetch('/api/admin/student/' + studentUserId + '/sessions', { credentials: 'include' }),
       fetch('/api/admin/student/' + studentUserId + '/logins',   { credentials: 'include' }),
+      fetch('/api/ranking', { credentials: 'include' }),
     ]);
 
-    var [statsJson, calJson, subJson, sessJson, loginJson] = await Promise.all([
-      statsRes.json(), calRes.json(), subRes.json(), sessRes.json(), loginRes.json(),
+    var [statsJson, calJson, subJson, sessJson, loginJson, rankingJson] = await Promise.all([
+      statsRes.json(), calRes.json(), subRes.json(), sessRes.json(), loginRes.json(), rankingRes.json(),
     ]);
 
     loading.classList.add('hidden');
@@ -3909,17 +3919,79 @@ async function loadAdminStudent(studentUserId) {
           var timeStr = jst.toLocaleTimeString('ja-JP', { hour:'2-digit', minute:'2-digit' });
           var dur = formatSecondsJaShort(s.total_seconds);
           var autoTag = s.auto_stopped ? '<span class="text-xs text-amber-500 ml-1">自動停止</span>' : '';
-          return '<div class="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0">'
-            + '<div>'
-            +   '<span class="text-xs text-gray-400">' + dateStr + ' ' + timeStr + '</span>'
-            +   '<span class="ml-2 text-xs font-medium text-gray-700">' + adminSubjectLabel(s.subject) + '</span>'
-            +   autoTag
+          // 複数教科（カンマ区切り）に対応
+          var subjectLabel = s.subject
+            ? s.subject.split(',').map(function(code) { return adminSubjectLabel(code.trim()); }).join(' / ')
+            : 'その他';
+          var memoHtml = s.memo
+            ? '<p class="text-xs text-gray-400 mt-0.5 truncate max-w-xs">' + s.memo + '</p>'
+            : '';
+          return '<div class="py-1.5 border-b border-gray-50 last:border-0">'
+            + '<div class="flex items-center justify-between">'
+            +   '<div>'
+            +     '<span class="text-xs text-gray-400">' + dateStr + ' ' + timeStr + '</span>'
+            +     '<span class="ml-2 text-xs font-semibold text-gray-700">' + subjectLabel + '</span>'
+            +     autoTag
+            +   '</div>'
+            +   '<span class="text-xs font-bold text-indigo-600 shrink-0 ml-2">' + dur + '</span>'
             + '</div>'
-            + '<span class="text-xs font-bold text-indigo-600">' + dur + '</span>'
+            + memoHtml
             + '</div>';
         }).join('');
       } else {
         sessEl.textContent = '記録がありません';
+      }
+    }
+
+    // ── ランキング ──
+    var rankingEl = document.getElementById('admin-ranking');
+    if (rankingEl) {
+      if (rankingJson.success && rankingJson.data) {
+        var rData = rankingJson.data;
+        // 生徒の表示名を取得（stats APIから）
+        var targetDisplayName = statsJson.success ? statsJson.data.student.display_name : studentUserId;
+
+        // ランキング内でその生徒の順位を探す
+        function findRank(ranking) {
+          if (!ranking || !ranking.ranking) return null;
+          for (var ri = 0; ri < ranking.ranking.length; ri++) {
+            if (ranking.ranking[ri].display_name === targetDisplayName) {
+              return { rank: ri + 1, total: ranking.ranking.length, seconds: ranking.ranking[ri].total_seconds };
+            }
+          }
+          // Top外の場合 my_rank が存在するか確認
+          if (ranking.my_rank) {
+            return { rank: ranking.my_rank.rank, total: ranking.total_count || ranking.ranking.length, seconds: ranking.my_rank.total_seconds };
+          }
+          return null;
+        }
+
+        var weekRank  = findRank(rData.week);
+        var monthRank = findRank(rData.month);
+
+        function rankBadge(r) {
+          if (!r) return '<span class="text-gray-400 text-xs">データなし</span>';
+          var emoji = r.rank === 1 ? '🥇' : r.rank === 2 ? '🥈' : r.rank === 3 ? '🥉' : '📌';
+          return '<div class="flex items-center gap-2">'
+            + '<span class="text-base">' + emoji + '</span>'
+            + '<span class="font-bold text-gray-800 text-sm">' + r.rank + '位</span>'
+            + '<span class="text-xs text-gray-400">/ ' + formatSecondsJaShort(r.seconds) + '</span>'
+            + '</div>';
+        }
+
+        rankingEl.innerHTML = ''
+          + '<div class="grid grid-cols-2 gap-3">'
+          + '<div class="bg-indigo-50 rounded-xl p-3">'
+          +   '<p class="text-xs text-indigo-400 font-medium mb-1">今週</p>'
+          +   rankBadge(weekRank)
+          + '</div>'
+          + '<div class="bg-purple-50 rounded-xl p-3">'
+          +   '<p class="text-xs text-purple-400 font-medium mb-1">今月</p>'
+          +   rankBadge(monthRank)
+          + '</div>'
+          + '</div>';
+      } else {
+        rankingEl.textContent = 'ランキングデータを取得できませんでした';
       }
     }
 
@@ -3928,16 +4000,19 @@ async function loadAdminStudent(studentUserId) {
     if (loginEl) {
       if (loginJson.success && loginJson.data.length > 0) {
         loginEl.innerHTML = loginJson.data.map(function(l) {
-          var jst = new Date(new Date(l.created_at).getTime() + 9*60*60*1000);
-          var str = jst.toLocaleDateString('ja-JP', { month:'numeric', day:'numeric' })
+          // SQLite datetime('now') は "YYYY-MM-DD HH:MM:SS" 形式でUTC保存
+          // Tに置換してUTCとしてパースし、+9時間でJSTに変換
+          var raw = (l.logged_in_at || '').replace(' ', 'T') + 'Z';
+          var jst = new Date(new Date(raw).getTime() + 9*60*60*1000);
+          var str = jst.toLocaleDateString('ja-JP', { year:'numeric', month:'numeric', day:'numeric' })
             + ' ' + jst.toLocaleTimeString('ja-JP', { hour:'2-digit', minute:'2-digit' });
-          return '<div class="flex items-center gap-2 py-1 border-b border-gray-50 last:border-0">'
+          return '<div class="flex items-center gap-2 py-1.5 border-b border-gray-50 last:border-0">'
             + '<i class="fas fa-circle text-green-300 text-xs"></i>'
-            + '<span class="text-xs text-gray-600">' + str + ' ログイン</span>'
+            + '<span class="text-xs text-gray-600">' + str + '</span>'
             + '</div>';
         }).join('');
       } else {
-        loginEl.textContent = 'ログイン履歴がありません';
+        loginEl.textContent = '今後ログインするたびに記録されます';
       }
     }
 

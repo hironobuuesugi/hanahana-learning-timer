@@ -147,6 +147,16 @@ auth.post('/login', async (c) => {
       'INSERT INTO sessions (session_token, user_id, expires_at) VALUES (?, ?, ?)'
     ).bind(sessionToken, user.id, expiresAt).run();
 
+    // ログイン履歴を記録（login_logs テーブルが存在する場合のみ）
+    try {
+      const ua = c.req.header('user-agent') ?? null;
+      await db.prepare(
+        'INSERT INTO login_logs (user_id, logged_in_at, user_agent) VALUES (?, datetime(\'now\'), ?)'
+      ).bind(user.id, ua).run();
+    } catch (_) {
+      // テーブルが未作成の環境（マイグレーション前）でもエラーにしない
+    }
+
     // HttpOnly CookieにセットしてレスポンスReturn
     c.header('Set-Cookie', `session_token=${sessionToken}; HttpOnly; Path=/; SameSite=Strict; Max-Age=${60 * 60 * 24 * 7}`);
 
