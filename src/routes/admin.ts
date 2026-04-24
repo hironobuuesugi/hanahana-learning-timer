@@ -115,42 +115,62 @@ admin.get('/student/:studentUserId/stats', async (c) => {
   `).bind(todayJST, weekStartJST, monthStartJST, student.id)
     .first<{ today_seconds: number; week_seconds: number; month_seconds: number; total_seconds: number }>()
 
-  // 連続記録・自己ベスト
+  // 連続記録・自己ベスト（stats.ts の /streak と完全同一ロジック）
   const streakRows = await db.prepare(`
-    SELECT DISTINCT date(started_at, '+9 hours') AS study_date
+    SELECT DISTINCT date(started_at, '+9 hours') AS jst_date
     FROM study_sessions
-    WHERE user_id = ? AND status = 'finished'
-    ORDER BY study_date DESC
-  `).bind(student.id).all<{ study_date: string }>()
+    WHERE user_id = ? AND status = 'finished' AND subject IS NOT NULL
+    ORDER BY jst_date DESC
+  `).bind(student.id).all<{ jst_date: string }>()
 
-  const dates = streakRows.results.map(r => r.study_date)
-  let streak = 0
-  let bestStreak = 0
-  let cur = 0
+  const dates = (streakRows.results ?? []).map(r => r.jst_date)
 
-  for (let i = 0; i < dates.length; i++) {
-    if (i === 0) {
-      const diffToday = Math.floor(
-        (new Date(todayJST).getTime() - new Date(dates[0]).getTime()) / 86400000
-      )
-      if (diffToday <= 1) { cur = 1; streak = 1 }
-      else { cur = 1 }
-    } else {
-      const prev = new Date(dates[i - 1])
-      const curr = new Date(dates[i])
-      const diff = Math.floor((prev.getTime() - curr.getTime()) / 86400000)
-      if (diff === 1) {
-        cur++
-        if (i === 1 || streak > 0) streak = cur
-      } else {
-        if (cur > bestStreak) bestStreak = cur
-        cur = 1
-        if (streak > 0 && i > 1) streak = 0
-      }
+  // JST今日・昨日の日付文字列
+  const jstNow = new Date(Date.now() + 9 * 60 * 60 * 1000)
+  const todayStr = jstNow.toISOString().slice(0, 10)
+  const yesterdayStr = new Date(jstNow.getTime() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+
+  const dateSet = new Set(dates)
+
+  // current_streak:
+  //   今日に記録があれば今日を起点に遡る
+  //   今日になくて昨日にあれば昨日を起点に遡る（今日まだ勉強していないが連続中）
+  //   どちらもなければ 0
+  let currentStreak = 0
+  if (dateSet.has(todayStr)) {
+    let checkDate = new Date(jstNow)
+    while (true) {
+      const d = checkDate.toISOString().slice(0, 10)
+      if (!dateSet.has(d)) break
+      currentStreak++
+      checkDate = new Date(checkDate.getTime() - 24 * 60 * 60 * 1000)
     }
-    if (cur > bestStreak) bestStreak = cur
+  } else if (dateSet.has(yesterdayStr)) {
+    let checkDate = new Date(jstNow.getTime() - 24 * 60 * 60 * 1000)
+    while (true) {
+      const d = checkDate.toISOString().slice(0, 10)
+      if (!dateSet.has(d)) break
+      currentStreak++
+      checkDate = new Date(checkDate.getTime() - 24 * 60 * 60 * 1000)
+    }
   }
-  if (streak === 0 && dates.length > 0) streak = 0
+
+  // best_streak: 全期間の最大連続日数
+  const sortedDates = [...dates].sort()
+  let bestStreak = dates.length > 0 ? 1 : 0
+  let runStreak = 1
+  for (let i = 1; i < sortedDates.length; i++) {
+    const prev = new Date(sortedDates[i - 1] + 'T00:00:00Z')
+    const curr = new Date(sortedDates[i]     + 'T00:00:00Z')
+    const diffDays = Math.round((curr.getTime() - prev.getTime()) / (24 * 60 * 60 * 1000))
+    if (diffDays === 1) {
+      runStreak++
+      if (runStreak > bestStreak) bestStreak = runStreak
+    } else {
+      runStreak = 1
+    }
+  }
+  if (currentStreak > bestStreak) bestStreak = currentStreak
 
   return c.json({
     success: true,
