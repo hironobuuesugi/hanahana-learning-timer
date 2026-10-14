@@ -36,3 +36,13 @@
 公開前に確認したPagesはr2、Git連携sourceはnull、GitHubには自動公開Workflowなし。本番構造では0009列あり・0010列/管理テーブルなしです。正式ビルドは現ソースから作成済みで、承認済みアプリソースと一致し、公開用5ファイルのみです。
 
 このコミットは公開用ソースの保存です。本番DB移行・Productionデプロイの完了結果は、実行後の追記で区別して記録します。
+
+## 公開実行とCookie互換性の修正
+
+最新版ソースはGitHub mainへ履歴を保持して保存しました（`ed42939ac09d07c1fb1fd1fb5608cf80ba70e28b`）。切替直前の暗号化領域内バックアップを隔離復元し、8表1595行の全値・構造・integrity・FKを確認。0010とその履歴登録だけを一度適用し、既存アカウント12件・学習記録1058件を含む旧列全値保全、追加表・列の整合性を確認しました。0009と過去のmigrationは実行していません。
+
+初回管理版deployment `bf638beb-212b-4aa9-94b7-0cc00fdc97ca` の公開後、本人の先生ログインでHTTP 500が発生。許可された1回の追加送信を公式Pagesリアルタイムログで確認し、`TypeError: ...headers.getSetCookie is not a function` を取得しました。入力値・Cookie・要求本文は診断ログに保存していません。学習記録やアカウント設定への書込み検証は行っていません。
+
+Wrangler Advanced Modeのアップロード実装では、設定ファイルがないとWorker bundleの互換性日付・フラグが省略されます。公開手順を、既存Productionの日付 `2026-04-01` と `http_headers_getsetcookie` を明示する `wrangler.toml` を読み込む方法に修正します。画面・アプリコード・依存・DBを変更せず、既存DB bindingと登録済みSecretを維持します。
+
+既存Wrangler付属のWorkers実行環境で、この設定と実際の正式Workerを使い、架空メモリDBの先生・生徒ログイン、HttpOnly/SameSite Cookie、認証維持、先生専用APIの200/403、ログアウトを限定確認：PASS。診断準備時のMiniflare API形式不一致による未実行を、検証PASSに含めていません。

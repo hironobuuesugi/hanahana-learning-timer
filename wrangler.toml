@@ -1,5 +1,7 @@
 name = "hanahana-learning-timer"
 pages_build_output_dir = "build/pages-management-20261015/dist"
+compatibility_date = "2026-04-01"
+compatibility_flags = ["http_headers_getsetcookie"]
 
 [[d1_databases]]
 binding = "DB"
