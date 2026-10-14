@@ -5,11 +5,11 @@
 //   → 指定生徒の今日(JST)のコメントを返す（全ログインユーザーが閲覧可）
 //
 // POST /api/comments
-//   → コメントを保存（hiro0808 のみ可）
+//   → コメントを保存（サーバー設定で指定した先生のみ可）
 //   body: { student_user_id: string, comment_text: string }
 //
 // 制約:
-//   - コメント保存は hiro0808 のみ
+//   - コメント保存は設定された先生のみ
 //   - 1生徒につき1日1コメント (UNIQUE制約 + UPSERT)
 //   - コメント50文字以内
 //   - 表示は当日(JST)分のみ
@@ -17,15 +17,13 @@
 
 import { Hono } from 'hono'
 import { authMiddleware } from '../middleware/auth'
+import { isTeacherUser } from '../utils/auth-settings'
 import type { Bindings, Variables } from '../types'
 
 const comments = new Hono<{ Bindings: Bindings; Variables: Variables }>()
 
 // 全エンドポイントに認証を適用
 comments.use('*', authMiddleware)
-
-// 先生アカウントID（固定）
-const TEACHER_USER_ID = 'hiro0808'
 
 // JST 今日の日付文字列 (YYYY-MM-DD) を返すヘルパー
 function getJstToday(): string {
@@ -80,7 +78,7 @@ comments.get('/', async (c) => {
 
 // =============================================
 // POST /api/comments
-// コメントを保存・更新（hiro0808 のみ）
+// コメントを保存・更新（設定された先生のみ）
 // body: { student_user_id: string, comment_text: string }
 // =============================================
 comments.post('/', async (c) => {
@@ -98,7 +96,7 @@ comments.post('/', async (c) => {
   }
 
   // 先生アカウントのみ許可
-  if (loginUser.user_id !== TEACHER_USER_ID) {
+  if (!isTeacherUser(c.env, loginUser.user_id)) {
     return c.json({ success: false, error: 'コメントの保存は先生アカウントのみ可能です' }, 403)
   }
 
@@ -142,7 +140,7 @@ comments.post('/', async (c) => {
       comment_text        = excluded.comment_text,
       created_by_user_id  = excluded.created_by_user_id,
       created_at          = excluded.created_at
-  `).bind(studentUserId, commentText, todayStr, TEACHER_USER_ID).run()
+  `).bind(studentUserId, commentText, todayStr, loginUser.user_id).run()
 
   return c.json({
     success: true,

@@ -5,7 +5,7 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { logger } from 'hono/logger'
-import { serveStatic } from 'hono/cloudflare-workers'
+import { serveStatic } from 'hono/cloudflare-pages'
 import authRoutes from './routes/auth'
 import timerRoutes from './routes/timer'
 import statsRoutes from './routes/stats'
@@ -14,6 +14,7 @@ import testdateRoutes from './routes/testdate'
 import rankingRoutes from './routes/ranking'
 import commentsRoutes from './routes/comments'
 import adminRoutes from './routes/admin'
+import { managementHeader, managementFooter, managementScript } from './ui/management'
 import { authMiddleware } from './middleware/auth'
 import type { Bindings, Variables } from './types'
 
@@ -29,7 +30,7 @@ app.use('/api/*', cors({
 }))
 
 // 静的ファイル配信
-app.use('/static/*', serveStatic({ root: './public' }))
+app.use('/static/*', serveStatic())
 
 // =============================================
 // manifest.json 配信（PWA・ホーム画面アイコン用）
@@ -37,7 +38,7 @@ app.use('/static/*', serveStatic({ root: './public' }))
 // =============================================
 app.get('/manifest.json', (c) => {
   c.header('Content-Type', 'application/manifest+json; charset=utf-8')
-  return c.text(JSON.stringify({
+  return c.body(JSON.stringify({
     name: '花はなタイマー',
     short_name: '花はなタイマー',
     display: 'standalone',
@@ -594,7 +595,7 @@ app.get('*', (c) => {
 
         </div>
 
-        <!-- 先生用管理画面ボタン（hiro0808のみ表示） -->
+        <!-- 先生用管理画面ボタン（サーバー判定の先生のみ表示） -->
         <div id="admin-menu-card" class="hidden mt-3">
           <div
             class="card p-4 cursor-pointer hover:shadow-md transition-shadow border-2 border-indigo-100 hover:border-indigo-300 bg-gradient-to-br from-indigo-50 to-purple-50"
@@ -633,7 +634,7 @@ app.get('*', (c) => {
           今月の自動停止回数
         </h3>
         <div class="flex items-center justify-between">
-          <span class="text-sm text-gray-600">90分自動停止された回数</span>
+          <span class="text-sm text-gray-600">自動停止された回数</span>
           <span id="auto-stop-count-badge" class="text-lg font-bold text-gray-700">--回</span>
         </div>
         <p class="text-xs text-gray-400 mt-2">
@@ -661,6 +662,13 @@ app.get('*', (c) => {
             <span class="text-sm text-gray-600" id="home-info-created">-</span>
           </div>
         </div>
+      </div>
+
+      <!-- 本人の未保存記録だけを案内する。保存・破棄は自動で行わない。 -->
+      <div id="pending-record-notice" class="hidden mt-6 rounded-xl border-2 border-pink-200 bg-pink-50 p-4">
+        <p id="pending-record-notice-text" class="font-bold text-pink-700"></p>
+        <p class="text-sm text-gray-600 mt-1">確定した勉強時間を残しています。教科と勉強内容を入力してください。</p>
+        <button id="pending-record-open-btn" onclick="openPendingRecord()" class="mt-3 w-full bg-pink-500 text-white font-bold py-3 rounded-xl">未保存の記録を入力する</button>
       </div>
 
       <!-- 勉強タイマーを始めるボタン（大きめ） -->
@@ -844,7 +852,7 @@ app.get('*', (c) => {
       <p class="text-sm text-gray-400 text-center py-2">まだ今日のコメントはありません</p>
     </div>
 
-    <!-- 先生用入力エリア（hiro0808のみ表示） -->
+    <!-- 先生用入力エリア（サーバー判定の先生のみ表示） -->
     <div id="comment-modal-input-area" class="hidden">
       <label class="text-xs text-gray-500 font-medium block mb-1">
         コメントを入力（50文字以内）
@@ -878,52 +886,9 @@ app.get('*', (c) => {
 </div>
 
 <!-- =============================================
-     ページ7: 先生用管理画面（hiro0808 のみ表示）
+     ページ7: 先生用管理画面（サーバー判定の先生 のみ表示）
      ============================================= -->
-<div id="page-admin" class="page">
-  <div class="min-h-screen bg-gray-50">
-
-    <!-- ヘッダー -->
-    <header class="bg-white shadow-sm sticky top-0 z-10">
-      <div class="max-w-2xl mx-auto px-4 py-3 flex items-center justify-between">
-        <button
-          onclick="showPage('page-home')"
-          class="text-gray-500 hover:text-gray-700 flex items-center gap-1 transition-colors"
-        >
-          <i class="fas fa-chevron-left"></i>
-          <span class="text-sm">ホーム</span>
-        </button>
-        <span class="font-bold text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-purple-500 text-sm">
-          👩‍🏫 先生管理画面
-        </span>
-        <div class="w-16"></div>
-      </div>
-    </header>
-
-    <main class="max-w-2xl mx-auto px-4 py-6">
-
-      <!-- 生徒セレクター -->
-      <div class="bg-white rounded-2xl shadow-sm p-4 mb-5">
-        <label class="block text-sm font-medium text-gray-600 mb-2">
-          <i class="fas fa-user-graduate text-indigo-400 mr-1"></i>
-          生徒を選んでください
-        </label>
-        <select
-          id="admin-student-select"
-          onchange="loadAdminStudent(this.value)"
-          class="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-300 bg-white"
-        >
-          <option value="">-- 生徒を選択 --</option>
-        </select>
-      </div>
-
-      <!-- ローディング -->
-      <div id="admin-loading" class="hidden text-center py-10">
-        <div class="inline-block w-8 h-8 border-4 border-indigo-200 border-t-indigo-400 rounded-full animate-spin mb-3"></div>
-        <p class="text-sm text-gray-400">読み込み中...</p>
-      </div>
-
-      <!-- 生徒詳細エリア（選択後に表示） -->
+${managementHeader}
       <div id="admin-student-detail" class="hidden space-y-4">
 
         <!-- 生徒情報ヘッダー -->
@@ -1013,9 +978,7 @@ app.get('*', (c) => {
 
       </div>
 
-    </main>
-  </div>
-</div>
+${managementFooter}
 
 <!-- =============================================
      ページ5: 勉強記録一覧画面
@@ -1109,7 +1072,7 @@ app.get('*', (c) => {
         <div class="flex items-start gap-3">
           <span class="text-2xl">⏰</span>
           <div>
-            <p class="font-bold text-red-700 text-base">90分で自動停止しました</p>
+            <p class="font-bold text-red-700 text-base">タイマーが自動停止しました</p>
             <p class="text-sm text-red-600 mt-1">勉強内容を記録してください</p>
           </div>
         </div>
@@ -1121,7 +1084,7 @@ app.get('*', (c) => {
           <span class="text-2xl">⚠️</span>
           <div>
             <p class="font-bold text-amber-800 text-base">60分経過しました</p>
-            <p class="text-sm text-amber-700 mt-1">90分経過時点でタイマーは自動停止します</p>
+            <p class="text-sm text-amber-700 mt-1">選んだ上限に達するとタイマーは自動停止します</p>
             <p class="text-sm text-amber-700">勉強中はこまめにタイマーを確認してください</p>
             <p class="text-sm text-amber-700">終了している場合はフィニッシュして内容を記録してください</p>
           </div>
@@ -1163,6 +1126,7 @@ app.get('*', (c) => {
           >
             <i class="fas fa-play"></i> スタート
           </button>
+<button id="btn-start-120" onclick="handleTimerStart(7200)" class="w-full bg-purple-50 text-purple-600 font-medium py-3 rounded-xl border border-purple-100">120分でスタート</button>
 
           <!-- 一時停止ボタン -->
           <button
@@ -1266,7 +1230,7 @@ app.get('*', (c) => {
             </li>
             <li class="flex items-start gap-2">
               <span class="text-red-400 mt-0.5 flex-shrink-0">▶</span>
-              <span>90分で自動停止します</span>
+              <span>通常90分・120分スタートは120分で自動停止します</span>
             </li>
             <li class="flex items-start gap-2">
               <span class="text-red-400 mt-0.5 flex-shrink-0">▶</span>
@@ -1369,7 +1333,7 @@ app.get('*', (c) => {
      勉強記録入力ダイアログ（フィニッシュ後に表示）
      ============================================= -->
 <div id="record-dialog" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-end sm:items-center justify-center z-50 p-4">
-  <div class="bg-white rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden">
+  <div class="bg-white rounded-2xl w-full max-w-sm shadow-2xl overflow-y-auto" style="max-height:90dvh">
 
     <!-- ダイアログヘッダー -->
     <div class="bg-gradient-to-r from-pink-400 to-purple-400 px-6 py-4 text-white text-center">
@@ -1381,6 +1345,15 @@ app.get('*', (c) => {
     <!-- 入力フォーム -->
     <div class="px-6 py-5 space-y-4">
 
+      <section id="record-auto-review" class="hidden bg-purple-50 rounded-xl p-3 space-y-2 text-sm text-gray-600">
+<h3 class="font-bold text-purple-600">タイマーが自動停止しました</h3>
+<p>計測された学習時間：<span id="record-measured-minutes"></span></p>
+<p class="font-bold">実際に勉強した時間と合っていますか？</p>
+<p>タイマーを止め忘れた場合は、<br>学習時間を短く修正できます。</p>
+<p>先生の管理画面には、<br><span style="display:inline-block;white-space:nowrap">自動停止した記録と</span><span style="display:inline-block;white-space:nowrap">修正内容が表示されます。</span></p>
+<div class="flex items-center justify-center gap-2"><button id="record-review-minus" type="button" onclick="adjustRecordMinutes(-5)" class="management-small">−5分</button><output id="record-review-minutes" class="management-input text-center font-bold text-purple-600" style="min-width:72px" aria-label="実際の学習時間（分）" aria-live="polite">90</output><span>分</span><button id="record-review-plus" type="button" onclick="adjustRecordMinutes(5)" class="management-small">＋5分</button></div>
+</section>
+      <p id="record-recovery-notice" class="hidden text-sm text-pink-700">前回保存していない勉強時間を復旧しました。入力後に保存してください。</p>
       <!-- エラーメッセージ -->
       <div id="record-error" class="hidden bg-red-50 border border-red-200 text-red-600 text-sm rounded-lg p-3 text-center"></div>
 
@@ -1642,6 +1615,13 @@ async function handleLogout() {
   } catch (err) {
     // エラーでも強制的にログアウト画面へ
   } finally {
+    pendingNoticeEpoch++;
+    pendingRecordGate = 'unknown';
+    recordSessionId = null;
+    recordSelectedSubjects = new Set();
+    document.getElementById('record-dialog').classList.add('hidden');
+    document.getElementById('pending-record-notice').classList.add('hidden');
+    document.getElementById('record-memo').value = '';
     currentUser = null;
     setLoading(false);
     showPage('page-login');
@@ -1678,11 +1658,12 @@ function updateHomeScreen(user) {
   fetchTestDate();
   // 今月の自動停止回数を取得して表示
   fetchAndRenderAutoStopCount();
+  refreshPendingRecordNotice(true);
 
-  // 先生アカウント(hiro0808)のみ管理画面ボタンを表示
+  // 先生アカウント(サーバー判定の先生)のみ管理画面ボタンを表示
   var adminCard = document.getElementById('admin-menu-card');
   if (adminCard) {
-    if (user.user_id === 'hiro0808') {
+    if (user.is_teacher === true) {
       adminCard.classList.remove('hidden');
     } else {
       adminCard.classList.add('hidden');
@@ -2058,7 +2039,7 @@ async function openCommentModal(studentUserId, displayName) {
   }
 
   // 先生アカウント判定
-  var isTeacher = (currentUser && currentUser.user_id === 'hiro0808');
+  var isTeacher = (currentUser && currentUser.is_teacher === true);
 
   // 当日コメントを取得
   try {
@@ -2209,7 +2190,7 @@ async function initRankingPage() {
     }
 
     // ─── 先生判定 ───
-    var isTeacher = (currentUser && currentUser.user_id === 'hiro0808');
+    var isTeacher = (currentUser && currentUser.is_teacher === true);
 
     // ─── 今月Top5の今日コメント有無を事前取得（生徒用表示制御） ───
     // 先生はすべての生徒にボタン表示するため取得不要
@@ -2312,7 +2293,7 @@ function renderRankingSection(opts) {
 
   // ランキング行を描画
   // 今月ランキング(periodType='month')のTop5にのみコメントボタンを表示
-  // 先生(hiro0808): 今月全員にボタン表示（コメント未入力の生徒へも新規入力できるよう）
+  // 先生(サーバー判定の先生): 今月全員にボタン表示（コメント未入力の生徒へも新規入力できるよう）
   // 生徒: 今月Top5のうち今日コメントが存在する生徒にのみボタン表示
   var isMonth = (opts.periodType === 'month');
   if (listEl) {
@@ -2537,12 +2518,12 @@ function groupRecordsByDate(records) {
 
   records.forEach(rec => {
     // JST 日付を YYYY-MM-DD キーに変換（UTC の slice は使わない）
-    const dateKey = isoToJstDateKey(rec.started_at);
+    const dateKey = rec.study_date || isoToJstDateKey(rec.started_at);
 
     if (!map[dateKey]) {
       map[dateKey] = {
         dateKey,
-        dateStr:      formatDateJa(rec.started_at),
+        dateStr:      formatDateJa(rec.study_date ? rec.study_date + 'T00:00:00+09:00' : rec.started_at),
         totalSeconds: 0,
         subjectSet:   new Set(),   // 重複排除用
         memos:        [],
@@ -2561,7 +2542,7 @@ function groupRecordsByDate(records) {
     }
 
     // 勉強内容を追加（空除外）。セッションIDと一緒に保持する
-    g.memos.push({ id: rec.id, text: rec.memo ? rec.memo.trim() : '', totalSeconds: rec.total_seconds || 0 });
+    g.memos.push({ autoLabel: autoHistoryLabel(rec), id: rec.id, text: rec.memo ? rec.memo.trim() : '', totalSeconds: rec.total_seconds || 0 });
   });
 
   // dateKey の降順（新しい日が上）に並べて返す
@@ -2608,6 +2589,7 @@ function buildDayCard(group) {
         + '<span style="font-size:0.875rem;color:#6b7ea8;white-space:nowrap;flex-shrink:0;">' + durLabel + '</span>'
         + '<button onclick="startEditMemo(' + sid + ')" title="編集" style="font-size:0.8rem;color:#9ca3af;border:1px solid #e5e7eb;border-radius:6px;padding:2px 6px;background:#f9fafb;white-space:nowrap;cursor:pointer;line-height:1.4;">✏️</button>'
         + '</div>'
+        + (m.autoLabel ? '<p style="font-size:0.75rem;color:#b77938;margin:2px 0 10px;">' + escapeHtml(m.autoLabel) + '</p>' : '')
         + '<div id="memo-edit-' + sid + '" style="display:none;margin-bottom:6px;">'
         +   '<textarea id="memo-input-' + sid + '" rows="3" style="width:100%;font-size:0.875rem;border:1px solid #f9a8d4;border-radius:8px;padding:6px 8px;resize:vertical;box-sizing:border-box;">' + escapeHtml(txt) + '</textarea>'
         +   '<div style="display:flex;gap:6px;margin-top:4px;">'
@@ -2872,6 +2854,10 @@ async function initTimerPage() {
   // 画面を必ずリセット状態にする（前回の数字が残らないように）
   resetTimerDisplay();
 
+  // 保存待ちを最優先し、照会失敗時も新規開始は許可しない。
+  const pending = await refreshPendingRecordNotice(true);
+  if (!pending || pending.data) return;
+
   // サーバーから現在のセッション状態を取得
   let serverState = null;
   try {
@@ -2901,7 +2887,7 @@ async function initTimerPage() {
     // calcElapsedSeconds は MAX_STUDY_SECONDS(5400) で上限打ち切り済みのため、
     // ここで >= 5400 なら「復帰時点で既に90分超え」→ 即自動停止を走らせる
     var elapsedOnReturn = calcElapsedSeconds(serverState);
-    if (elapsedOnReturn >= MAX_STUDY_SECONDS && !timerAutoStopTriggered) {
+    if (elapsedOnReturn >= timerLimit(serverState) && !timerAutoStopTriggered) {
       timerAutoStopTriggered = true;
       renderTimerUI();
       await handleTimerAutoStop();
@@ -2911,39 +2897,9 @@ async function initTimerPage() {
     }
 
   } else {
-    // ─── セッションなし / 終了済み → 通常の待機状態 ───
-    // ただし、90分自動停止後で未記録のセッションがある場合は案内バナーを表示する
     timerState = null;
-
-    // 未記録の自動停止セッションを確認
-    let pendingState = null;
-    try {
-      const pRes = await fetch('/api/timer/pending-record', { credentials: 'include' });
-      const pData = await pRes.json();
-      if (pData.success && pData.data && pData.data.auto_stopped === 1) {
-        pendingState = pData.data;
-      }
-    } catch (err) { /* 無視 */ }
-
-    if (pendingState) {
-      // 90分自動停止後の未記録セッションがある → 案内バナーと記録ダイアログを表示
-      timerState = pendingState;
-      const banner = document.getElementById('auto-stopped-banner');
-      if (banner) banner.classList.remove('hidden');
-      const display = document.getElementById('timer-display');
-      if (display) display.textContent = formatSecondsDisplay(pendingState.total_seconds);
-      renderTimerUI();
-      if (pendingState.total_seconds >= 300) {
-        showRecordDialog(pendingState.session_id, pendingState.total_seconds);
-      } else {
-        const shortId = pendingState.session_id;
-        showTimerSuccess('5分未満の勉強は記録されません（自動停止）');
-        setTimeout(() => discardShortSessionAndGoHome(shortId), 1500);
-      }
-    } else {
-      renderTimerUI();
-      startTimerTick();
-    }
+    renderTimerUI();
+    startTimerTick();
   }
 }
 
@@ -3060,7 +3016,9 @@ function renderTimerUI() {
     frozen:   '確認が必要です',
     finished: 'お疲れ様でした！🌸',
   };
-  subText.textContent = subMap[status] || '';
+  subText.textContent = (subMap[status] || '') + ((status === 'running' || status === 'paused') ? '（' + timerLimit(timerState)/60 + '分モード）' : '');
+  var limitWarning = document.getElementById('timer-limit-warning');
+  if (limitWarning && status !== 'running' && status !== 'paused') limitWarning.classList.add('hidden');
 
   // ボタン表示制御（frozen は idle 扱いで全ボタン隠す）
   const showStart  = (status === 'idle');
@@ -3069,9 +3027,12 @@ function renderTimerUI() {
   const showFinish = (status === 'running' || status === 'paused');
 
   document.getElementById('btn-start').classList.toggle('hidden',  !showStart);
+  document.getElementById('btn-start-120').classList.toggle('hidden', !showStart);
+  setButtonDisabled('btn-start-120', pendingRecordGate !== 'clear');
   document.getElementById('btn-pause').classList.toggle('hidden',  !showPause);
   document.getElementById('btn-resume').classList.toggle('hidden', !showResume);
   document.getElementById('btn-finish').classList.toggle('hidden', !showFinish);
+  setButtonDisabled('btn-start', pendingRecordGate !== 'clear');
 }
 
 // -----------------------------------------------
@@ -3086,12 +3047,13 @@ function startTimerTick() {
     if (!timerState || timerState.status === 'idle' || timerState.status === 'finished' || timerState.status === 'frozen') return;
     const elapsed = calcElapsedSeconds(timerState);
     const display = document.getElementById('timer-display');
+    updateTimerLimitNotice(elapsed);
     if (display) display.textContent = formatSecondsDisplay(elapsed);
     const under5El = document.getElementById('timer-under5min');
     if (under5El) { elapsed < 300 ? under5El.classList.remove('hidden') : under5El.classList.add('hidden'); }
     const warn60El = document.getElementById('timer-60min-warning');
-    if (warn60El) { (elapsed >= 3600 && elapsed < MAX_STUDY_SECONDS) ? warn60El.classList.remove('hidden') : warn60El.classList.add('hidden'); }
-    if (elapsed >= MAX_STUDY_SECONDS && !timerAutoStopTriggered) { timerAutoStopTriggered = true; await handleTimerAutoStop(); }
+    if (warn60El) { (elapsed >= 3600 && elapsed < timerLimit(timerState)) ? warn60El.classList.remove('hidden') : warn60El.classList.add('hidden'); }
+    if (elapsed >= timerLimit(timerState) && !timerAutoStopTriggered) { timerAutoStopTriggered = true; await handleTimerAutoStop(); }
   })();
 
   timerIntervalId = setInterval(async () => {
@@ -3101,6 +3063,7 @@ function startTimerTick() {
     }
     const elapsed = calcElapsedSeconds(timerState);
     const display = document.getElementById('timer-display');
+    updateTimerLimitNotice(elapsed);
     if (display) display.textContent = formatSecondsDisplay(elapsed);
 
     // ── 5分未満表示（5分 = 300秒） ──
@@ -3116,7 +3079,7 @@ function startTimerTick() {
     // ── 60分警告（60分 = 3600秒）～90分手前まで表示 ──
     const warn60El = document.getElementById('timer-60min-warning');
     if (warn60El) {
-      if (elapsed >= 3600 && elapsed < MAX_STUDY_SECONDS) {
+      if (elapsed >= 3600 && elapsed < timerLimit(timerState)) {
         warn60El.classList.remove('hidden');
       } else {
         warn60El.classList.add('hidden');
@@ -3124,7 +3087,7 @@ function startTimerTick() {
     }
 
     // ── 90分自動停止（90分 = MAX_STUDY_SECONDS 秒） ──
-    if (elapsed >= MAX_STUDY_SECONDS && !timerAutoStopTriggered) {
+    if (elapsed >= timerLimit(timerState) && !timerAutoStopTriggered) {
       timerAutoStopTriggered = true;
       await handleTimerAutoStop();
     }
@@ -3161,6 +3124,7 @@ async function handleTimerAutoStop() {
       // 記録ダイアログを表示（5分以上の場合のみ）
       if (timerState.total_seconds >= 300) {
         showRecordDialog(timerState.session_id, timerState.total_seconds);
+        await refreshPendingRecordNotice(true);
       } else {
         // 5分未満なので破棄してホームへ
         const shortId = timerState.session_id;
@@ -3191,6 +3155,7 @@ function stopTimerTick() {
 // -----------------------------------------------
 // 90分 = 5400秒 の上限定数（バックエンドと同値）
 var MAX_STUDY_SECONDS = 5400;
+function timerLimit(state) { return state && state.time_limit_seconds === 7200 ? 7200 : 5400; }
 
 function calcElapsedSeconds(state) {
   if (!state) return 0;
@@ -3213,7 +3178,7 @@ function calcElapsedSeconds(state) {
   // 90分（5400秒）を上限とする
   // iPhoneスリープ復帰後など、実経過時間が90分を超えていても
   // フロント表示・自動停止判定ともに 90分 で打ち切る
-  return Math.min(Math.max(0, elapsed), MAX_STUDY_SECONDS);
+  return Math.min(Math.max(0, elapsed), timerLimit(state));
 }
 
 // -----------------------------------------------
@@ -3245,18 +3210,25 @@ function formatSecondsJa(sec) {
 // -----------------------------------------------
 // スタート
 // -----------------------------------------------
-async function handleTimerStart() {
+async function handleTimerStart(limit = 5400) {
+  if (recordSaveInFlight || recordSessionId !== null || pendingRecordGate !== 'clear') {
+    await refreshPendingRecordNotice(true);
+    return;
+  }
   clearTimerError();
-  setButtonDisabled('btn-start', true);
+  setButtonDisabled('btn-start', true);setButtonDisabled('btn-start-120', true);
   try {
     const res = await fetch('/api/timer/start', {
-      method: 'POST',
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({time_limit_seconds: limit}),
       credentials: 'include',
     });
     const data = await res.json();
     if (data.success) {
       timerState = data.data;
-      renderTimerUI();
+      renderTimerUI();startTimerTick();
+    } else if (data.code === 'PENDING_RECORD') {
+      pendingRecordGate = 'pending';
+      await refreshPendingRecordNotice(true);
     } else {
       showTimerError(data.error || 'スタートに失敗しました');
       if (data.data) {
@@ -3267,7 +3239,7 @@ async function handleTimerStart() {
   } catch (err) {
     showTimerError('通信エラーが発生しました');
   } finally {
-    setButtonDisabled('btn-start', false);
+    setButtonDisabled('btn-start', pendingRecordGate !== 'clear');setButtonDisabled('btn-start-120', pendingRecordGate !== 'clear');
   }
 }
 
@@ -3353,6 +3325,7 @@ async function handleTimerFinish() {
         setTimeout(() => discardShortSessionAndGoHome(shortId), 1500);
       } else {
         showRecordDialog(timerState.session_id, timerState.total_seconds);
+        await refreshPendingRecordNotice(true);
       }
     } else {
       showTimerError(data.error || 'フィニッシュに失敗しました');
@@ -3397,8 +3370,9 @@ function handleTimerBack() {
 // -----------------------------------------------
 function showAbandonedDialog(state) {
   // 開始時刻を日本語表記に変換
-  const startedDate = new Date(state.started_at);
+  const startedDate = new Date(state.original_started_at || state.started_at);
   const startedStr = startedDate.toLocaleString('ja-JP', {
+    timeZone: 'Asia/Tokyo',
     month: 'numeric', day: 'numeric',
     hour: '2-digit', minute: '2-digit'
   });
@@ -3511,6 +3485,7 @@ async function handleAbandonedFinish() {
         setTimeout(() => discardShortSessionAndGoHome(shortId), 1500);
       } else {
         showRecordDialog(timerState.session_id, timerState.total_seconds);
+        await refreshPendingRecordNotice(true);
       }
 
     } else {
@@ -3533,14 +3508,123 @@ async function handleAbandonedFinish() {
 let recordSelectedSubjects = new Set();
 // 記録対象のセッションID
 let recordSessionId = null;
+let recordSaveInFlight = false;
+let pendingNoticeEpoch = 0;
+let pendingRecordGate = 'unknown';
+
+function recordResponseError(res) {
+  const error = new Error('未保存記録の取得失敗');
+  error.authExpired = res.status === 401;
+  return error;
+}
+async function fetchRecordJSON(path, options = {}) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+  try {
+    const res = await fetch(path, { ...options, credentials: 'include', signal: controller.signal });
+    if (res.status === 401) throw recordResponseError(res);
+    const data = await res.json();
+    return { res, data };
+  } finally { clearTimeout(timeout); }
+}
+function expireRecordLogin(ownerId) {
+  if (!currentUser || currentUser.user_id !== ownerId) return;
+  pendingNoticeEpoch++;
+  pendingRecordGate = 'unknown';
+  recordSessionId = null;
+  recordSelectedSubjects = new Set();
+  document.getElementById('record-dialog').classList.add('hidden');
+  document.getElementById('record-memo').value = '';
+  document.getElementById('pending-record-notice').classList.add('hidden');
+  currentUser = null;
+  showPage('page-login');
+  showError('login-error', 'ログインの期限が切れました。再ログインしてください。勉強時間は残っています。');
+}
+async function readPendingRecord() {
+  const { res, data: result } = await fetchRecordJSON('/api/timer/pending-record');
+  if (!res.ok || !result.success) throw recordResponseError(res);
+  if (result.data && (result.data.status !== 'finished' || result.data.total_seconds < 300)) throw new Error('復旧対象が正しくありません');
+  return result;
+}
+async function readRecordSaved(sessionId) {
+  const { res, data: result } = await fetchRecordJSON('/api/timer/record-status?session_id=' + encodeURIComponent(sessionId));
+  if (!res.ok || !result.success || result.data.session_id !== sessionId || typeof result.data.saved !== 'boolean') throw new Error('保存状態を確認できません');
+  return result.data.saved;
+}
+function updateRecordRecoveryNotice(recovered, count) {
+  const notice = document.getElementById('record-recovery-notice');
+  notice.textContent = count > 1 ? '未保存の勉強記録が' + count + '件あります。古い記録から順番に保存してください。' : '前回保存していない勉強時間を復旧しました。入力後に保存してください。';
+  notice.classList.toggle('hidden', !recovered && count <= 1);
+}
+async function refreshPendingRecordNotice(autoOpen = false) {
+  const epoch = ++pendingNoticeEpoch;
+  const ownerId = currentUser && currentUser.user_id;
+  const banner = document.getElementById('pending-record-notice');
+  if (!ownerId) { pendingRecordGate = 'unknown'; banner.classList.add('hidden'); setButtonDisabled('btn-start', true); return null; }
+  pendingRecordGate = 'unknown';
+  setButtonDisabled('btn-start', true);
+  try {
+    const pending = await readPendingRecord();
+    if (epoch !== pendingNoticeEpoch || !currentUser || currentUser.user_id !== ownerId) return null;
+    // 別タブで保存済みになった場合も、本人の保存状態を確認して表示を解放する。
+    if (recordSessionId !== null && !recordSaveInFlight && (!pending.data || recordSessionId !== pending.data.session_id)) {
+      const oldId = recordSessionId;
+      const saved = await readRecordSaved(oldId);
+      if (epoch !== pendingNoticeEpoch || !currentUser || currentUser.user_id !== ownerId) return null;
+      if (!saved && !pending.data) throw new Error('未保存記録の順序を確認できません');
+      document.getElementById('record-dialog').classList.add('hidden');
+      recordSessionId = null;
+      if (!timerState || timerState.status === 'finished') resetTimerFull();
+      fetchAndRenderStats();fetchAndRenderStreak();fetchAndRenderCalendar();
+    }
+    pendingRecordGate = pending.data ? 'pending' : 'clear';
+    banner.classList.toggle('hidden', !pending.data);
+    if (pending.data) {
+      document.getElementById('pending-record-notice-text').textContent = '保存していない勉強記録が' + (pending.pending_count || 1) + '件あります';
+      if (!timerState || timerState.status === 'finished') {
+        timerState = pending.data;
+        document.getElementById('timer-display').textContent = formatSecondsDisplay(pending.data.total_seconds);
+        document.getElementById('auto-stopped-banner').classList.toggle('hidden', pending.data.auto_stopped !== 1);
+        renderTimerUI();
+      }
+      if (autoOpen && !recordSaveInFlight) {
+        if (recordSessionId !== pending.data.session_id || document.getElementById('record-dialog').classList.contains('hidden')) {
+          showRecordDialog(pending.data.session_id, pending.data.total_seconds, true, pending.pending_count || 1);
+        } else updateRecordRecoveryNotice(false, pending.pending_count || 1);
+      }
+    }
+    setButtonDisabled('btn-start', pendingRecordGate !== 'clear');
+    return pending;
+  } catch (err) {
+    if (epoch === pendingNoticeEpoch && currentUser && currentUser.user_id === ownerId) {
+      pendingRecordGate = 'unknown';setButtonDisabled('btn-start', true);
+      if (err.authExpired) { expireRecordLogin(ownerId); return null; }
+      document.getElementById('pending-record-notice-text').textContent = '未保存記録を確認できませんでした。通信復旧後にボタンで再確認してください。';
+      banner.classList.remove('hidden');
+    }
+    return null;
+  }
+}
+async function openPendingRecord() {
+  if (recordSaveInFlight) return;
+  await refreshPendingRecordNotice(true);
+}
+// 追加ボタンを作らず、通信復旧・画面復帰時にも保存状態を再照会する。
+window.addEventListener('online', () => { if (currentUser) refreshPendingRecordNotice(true); });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && currentUser) refreshPendingRecordNotice(true); });
 
 // -----------------------------------------------
 // 記録ダイアログを表示する
 // sessionId: 対象セッションID
 // totalSeconds: 今回の勉強秒数
 // -----------------------------------------------
-function showRecordDialog(sessionId, totalSeconds) {
+function showRecordDialog(sessionId, totalSeconds, recovered = false, pendingCount = 1) {
+  if (recordSaveInFlight) return;
+  pendingRecordGate = 'pending';
+  setButtonDisabled('btn-start', true);
+  updateRecordRecoveryNotice(recovered, pendingCount);
   recordSessionId = sessionId;
+  setupRecordReview(sessionId, totalSeconds);
   recordSelectedSubjects = new Set(); // 選択状態をリセット
 
   // 時間表示を設定
@@ -3597,12 +3681,20 @@ function selectSubject(subject) {
 // 記録保存ハンドラ
 // -----------------------------------------------
 async function handleRecordSave() {
+  if (recordSaveInFlight || recordSessionId === null || !currentUser) return;
+  const ownerId = currentUser.user_id;
+  const sessionId = recordSessionId;
+  let saved = false;
   const errEl = document.getElementById('record-error');
   if (errEl) {
     errEl.classList.add('hidden');
     errEl.textContent = '';
   }
 
+  if (recordReviewActive && (!Number.isInteger(recordReviewMinutes) || recordReviewSeconds() < 300 || recordReviewSeconds() > recordReviewOriginal)) {
+    errEl.textContent = recordReviewSeconds() < 300 ? '学習時間が5分未満のため保存できません。5分以上に修正してください。' : '元の計測時間以下で入力してください。';
+    errEl.classList.remove('hidden');return;
+  }
   // バリデーション: 教科（1つ以上必須）
   if (recordSelectedSubjects.size === 0) {
     if (errEl) {
@@ -3621,47 +3713,57 @@ async function handleRecordSave() {
     return;
   }
 
+  recordSaveInFlight = true;
   setButtonDisabled('record-save-btn', true);
 
   try {
-    const res = await fetch('/api/timer/record', {
+    const { res, data } = await fetchRecordJSON('/api/timer/record', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
       body: JSON.stringify({
-        session_id: recordSessionId,
+        session_id: sessionId,
+        total_seconds: recordReviewActive ? recordReviewSeconds() : undefined,
         subjects: Array.from(recordSelectedSubjects), // Set → 配列に変換して送信
         memo: memo,
       }),
     });
-    const data = await res.json();
+    if (!currentUser || currentUser.user_id !== ownerId) return;
 
+    if (res.status === 401) { expireRecordLogin(ownerId); return; }
     if (data.success) {
-      // ダイアログを閉じる
-      document.getElementById('record-dialog').classList.add('hidden');
-
-      // タイマー状態を完全リセット
-      resetTimerFull();
-
-      // ホーム画面へ自動遷移＋集計更新
-      showPage('page-home');
-      fetchAndRenderStats();
-      fetchAndRenderStreak();
-      fetchAndRenderCalendar();
-
-    } else {
-      if (errEl) {
-        errEl.textContent = data.error || '保存に失敗しました';
-        errEl.classList.remove('hidden');
-      }
-      setButtonDisabled('record-save-btn', false);
-    }
-  } catch (err) {
-    if (errEl) {
-      errEl.textContent = '通信エラーが発生しました。もう一度お試しください';
+      saved = true;
+    } else if (res.status === 409 && await readRecordSaved(sessionId)) {
+      // 保存の返答消失・別タブでの保存成功を確認。再保存は行わない。
+      saved = true;
+    } else if (errEl) {
+      errEl.textContent = data.error || '保存に失敗しました';
       errEl.classList.remove('hidden');
     }
+  } catch (err) {
+    if (!currentUser || currentUser.user_id !== ownerId) return;
+    if (err.authExpired) { expireRecordLogin(ownerId); return; }
+    try {
+      saved = await readRecordSaved(sessionId);
+    } catch (statusError) {
+      if (statusError.authExpired) { expireRecordLogin(ownerId); return; }
+    }
+    if (!saved && errEl) {
+      errEl.textContent = '通信エラーが発生しました。勉強時間と入力は残っています。通信復旧後にもう一度保存してください。';
+      errEl.classList.remove('hidden');
+    }
+  } finally {
+    recordSaveInFlight = false;
     setButtonDisabled('record-save-btn', false);
+  }
+  if (saved && currentUser && currentUser.user_id === ownerId) {
+    recordSessionId = null;
+    pendingRecordGate = 'unknown';
+    document.getElementById('record-dialog').classList.add('hidden');
+    if (!timerState || timerState.status === 'finished') resetTimerFull();
+    showPage('page-home');
+    fetchAndRenderStats();fetchAndRenderStreak();fetchAndRenderCalendar();
+    await refreshPendingRecordNotice(true);
   }
 }
 
@@ -3856,7 +3958,7 @@ async function loadAdminStudent(studentUserId) {
       var weekEl  = document.getElementById('admin-stats-week');
       var monEl   = document.getElementById('admin-stats-month');
       var totEl   = document.getElementById('admin-stats-total');
-      if (todayEl) todayEl.textContent = formatSecondsJaShort(d.today_seconds);
+      if (todayEl) todayEl.innerHTML = managementSummary(d.today_seconds);
       if (weekEl)  weekEl.textContent  = formatSecondsJaShort(d.week_seconds);
       if (monEl)   monEl.textContent   = formatSecondsJaShort(d.month_seconds);
       if (totEl)   totEl.textContent   = formatSecondsJaShort(d.total_seconds);
@@ -3914,7 +4016,7 @@ async function loadAdminStudent(studentUserId) {
             ? s.subject.split(',').map(function(code) { return adminSubjectLabel(code.trim()); }).join(' / ')
             : 'その他';
           var memoHtml = s.memo
-            ? '<p class="text-xs text-gray-400 mt-0.5 truncate max-w-xs">' + s.memo + '</p>'
+            ? '<p class="text-xs text-gray-400 mt-0.5 max-w-xs" style="white-space:pre-wrap;overflow-wrap:anywhere;">' + escapeHtml(s.memo) + '</p>'
             : '';
           return '<div class="py-1.5 border-b border-gray-50 last:border-0">'
             + '<div class="flex items-center justify-between">'
@@ -4018,6 +4120,29 @@ function renderAdminCalendar(container, studyDates) {
   html += '</div>';
   container.innerHTML = html;
 }
+var recordReviewActive=false,recordReviewOriginal=0,recordReviewMinutes=0;
+function setupRecordReview(id,seconds){
+  recordReviewActive=!!(timerState&&timerState.session_id===id&&timerState.auto_stopped);
+  recordReviewOriginal=(timerState&&timerState.auto_stop_seconds)||seconds;
+  recordReviewMinutes=Math.floor(recordReviewOriginal/60);
+  document.getElementById('record-auto-review').classList.toggle('hidden',!recordReviewActive);
+  document.getElementById('record-measured-minutes').textContent=recordReviewMinutes+'分';
+  renderRecordReviewTime();
+}
+function recordReviewSeconds(){return recordReviewMinutes*60;}
+function renderRecordReviewTime(){
+  document.getElementById('record-review-minutes').textContent=recordReviewMinutes;
+  document.getElementById('record-dialog-time').textContent=formatSecondsJa(recordReviewSeconds());
+  document.getElementById('record-review-minus').disabled=recordReviewMinutes<=0;
+  document.getElementById('record-review-plus').disabled=recordReviewSeconds()>=recordReviewOriginal;
+}
+function adjustRecordMinutes(delta){
+  if(recordSaveInFlight||!recordReviewActive||(delta!==-5&&delta!==5))return;
+  recordReviewMinutes=Math.max(0,Math.min(Math.floor(recordReviewOriginal/60),recordReviewMinutes+delta));
+  renderRecordReviewTime();
+}
+function updateTimerLimitNotice(elapsed){var warning=document.getElementById('timer-limit-warning');if(!warning){warning=document.createElement('p');warning.id='timer-limit-warning';warning.className='hidden bg-purple-50 text-purple-600 rounded-xl p-3 text-sm text-center mb-3';document.getElementById('timer-60min-warning').insertAdjacentElement('afterend',warning);}warning.textContent='自動停止まであと5分です（'+(timerLimit(timerState)/60)+'分モード）';warning.classList.toggle('hidden',elapsed<timerLimit(timerState)-300||elapsed>=timerLimit(timerState));}
+${managementScript}
 </script>
 </body>
 </html>`)

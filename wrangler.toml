@@ -1,0 +1,10 @@
+name = "hanahana-learning-timer"
+pages_build_output_dir = "build/pages-management-20261015/dist"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "hanahana-production"
+database_id = "fb999a8c-751b-4cfb-b7f2-7f02ec3f3740"
+
+# Secrets are registered in Cloudflare. Do not commit values.
+# 0009 is already applied but not in d1_migrations. Never run automatic migrations.

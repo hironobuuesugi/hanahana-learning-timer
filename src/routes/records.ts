@@ -11,7 +11,7 @@
 //     data: [
 //       {
 //         id:            number,   // セッションID
-//         started_at:    string,   // 勉強開始日時 (ISO8601)
+//         started_at:    string,   // 最初の開始日時（表示・JST所属日用。ISO8601）
 //         total_seconds: number,   // 勉強時間（秒）
 //         subject:       string,   // 教科（カンマ区切り, 例: "english,math"）
 //         memo:          string,   // 勉強内容
@@ -49,15 +49,15 @@ records.get('/', async (c) => {
   const rows = await db.prepare(`
     SELECT
       id,
-      started_at,
-      total_seconds,
+      COALESCE(original_started_at, started_at) AS started_at,
+      total_seconds, study_date, record_source, auto_stopped, auto_stop_seconds, time_limit_seconds,
       subject,
       memo
     FROM study_sessions
     WHERE user_id    = ?
       AND status     = 'finished'
       AND subject    IS NOT NULL
-    ORDER BY started_at DESC
+    ORDER BY COALESCE(study_date, date(COALESCE(original_started_at, started_at), '+9 hours')) DESC, id DESC
   `).bind(userId).all<{
     id: number
     started_at: string
@@ -119,7 +119,7 @@ records.patch('/:id', async (c) => {
 
   // memo のみ更新（他フィールドは一切触らない）
   const result = await db.prepare(`
-    UPDATE study_sessions SET memo = ? WHERE id = ? AND user_id = ?
+    UPDATE study_sessions SET memo = ?, revision=revision+1 WHERE id = ? AND user_id = ? AND EXISTS(SELECT 1 FROM users WHERE id=study_sessions.user_id AND archived_at IS NULL)
   `).bind(memoStr, sessionId, userId).run()
 
   if (!result.success) {

@@ -18,12 +18,12 @@
 //
 // 集計方針:
 //   - 対象: status = 'finished' かつ subject IS NOT NULL（教科・内容を記録入力済み）
-//     ※60秒未満のセッションは subject が NULL のまま廃棄されるので自動除外される
-//   - 日付の判定は started_at（勉強を始めた日）を使用
+//     ※5分未満は保存できずsubjectがNULLのため自動除外される
+//   - 日付の判定は original_started_at（最初の開始日時）を使用。NULLの旧形式は現在のstarted_atで補う
 //     ※recorded_at は現状 NULL が入るため使用しない
 //   - 日付計算は日本時間（JST = UTC+9）基準で行う
 //     started_at は UTC の ISO 文字列で保存されているため、
-//     SQLite 側で date(started_at, '+9 hours') を使って JST 日付に変換して比較する
+//     SQLite 側で COALESCE(study_date, date(COALESCE(original_started_at, started_at), '+9 hours')) を使って JST 日付に変換して比較する
 //   - 今日   : JST で今日の YYYY-MM-DD と一致するもの
 //   - 今週   : JST で今週の月曜日以降のもの
 //   - 今月   : JST で今月の YYYY-MM と一致するもの
@@ -91,7 +91,7 @@ stats.get('/', async (c) => {
   //
   // 日付比較:
   //   started_at は UTC の ISO 文字列で保存されているため
-  //   date(started_at, '+9 hours') で JST 日付に変換してから比較する
+  //   COALESCE(study_date, date(COALESCE(original_started_at, started_at), '+9 hours')) で JST 日付に変換してから比較する
   //   例: "2026-04-01T18:30:00.000Z" → date 関数で "2026-04-01"(UTC) → '+9 hours' で "2026-04-02"(JST)
   // ─────────────────────────────────────────
 
@@ -102,7 +102,7 @@ stats.get('/', async (c) => {
     WHERE user_id       = ?
       AND status        = 'finished'
       AND subject       IS NOT NULL
-      AND date(started_at, '+9 hours') = ?
+      AND COALESCE(study_date, date(COALESCE(original_started_at, started_at), '+9 hours')) = ?
   `).bind(userId, todayStr).first<{ seconds: number }>();
 
   // --- 今週（JST 今週の月曜 0:00〜現在）---
@@ -112,8 +112,8 @@ stats.get('/', async (c) => {
     WHERE user_id       = ?
       AND status        = 'finished'
       AND subject       IS NOT NULL
-      AND date(started_at, '+9 hours') >= ?
-      AND date(started_at, '+9 hours') <= ?
+      AND COALESCE(study_date, date(COALESCE(original_started_at, started_at), '+9 hours')) >= ?
+      AND COALESCE(study_date, date(COALESCE(original_started_at, started_at), '+9 hours')) <= ?
   `).bind(userId, mondayStr, todayStr).first<{ seconds: number }>();
 
   // --- 今月（JST 今月の 1日 0:00〜現在）---
@@ -123,7 +123,7 @@ stats.get('/', async (c) => {
     WHERE user_id       = ?
       AND status        = 'finished'
       AND subject       IS NOT NULL
-      AND strftime('%Y-%m', started_at, '+9 hours') = ?
+      AND COALESCE(substr(study_date,1,7), strftime('%Y-%m', COALESCE(original_started_at, started_at), '+9 hours')) = ?
   `).bind(userId, monthStr).first<{ seconds: number }>();
 
   // --- 累計（全期間）---
@@ -137,16 +137,16 @@ stats.get('/', async (c) => {
 
   // --- 自己ベスト（1日合計が最大の日）---
   // JST 日付ごとに合計秒数を集計し、最大値の行を取得する
-  // date(started_at, '+9 hours') で JST 日付キーを生成（既存の集計と同じ基準）
+  // COALESCE(study_date, date(COALESCE(original_started_at, started_at), '+9 hours')) で JST 日付キーを生成（既存の集計と同じ基準）
   const bestRow = await db.prepare(`
     SELECT
-      date(started_at, '+9 hours')  AS jst_date,
+      COALESCE(study_date, date(COALESCE(original_started_at, started_at), '+9 hours'))  AS jst_date,
       SUM(total_seconds)            AS day_seconds
     FROM study_sessions
     WHERE user_id  = ?
       AND status   = 'finished'
       AND subject  IS NOT NULL
-    GROUP BY date(started_at, '+9 hours')
+    GROUP BY COALESCE(study_date, date(COALESCE(original_started_at, started_at), '+9 hours'))
     ORDER BY day_seconds DESC
     LIMIT 1
   `).bind(userId).first<{ jst_date: string; day_seconds: number }>();
@@ -182,7 +182,7 @@ stats.get('/', async (c) => {
 //
 // 計算ルール:
 //   - 対象: status='finished' かつ subject IS NOT NULL
-//   - 期間: JST 今月 (strftime('%Y-%m', started_at, '+9 hours') = 今月YYYY-MM)
+//   - 期間: JST 今月 (COALESCE(substr(study_date,1,7), strftime('%Y-%m', COALESCE(original_started_at, started_at), '+9 hours')) = 今月YYYY-MM)
 //   - 複数教科選択時は total_seconds を教科数で均等配分（秒単位）
 //   - 配分は浮動小数で合計し、最終的に Math.floor で整数秒に変換
 // =============================================
@@ -202,7 +202,7 @@ stats.get('/subjects', async (c) => {
     WHERE user_id = ?
       AND status  = 'finished'
       AND subject IS NOT NULL
-      AND strftime('%Y-%m', started_at, '+9 hours') = ?
+      AND COALESCE(substr(study_date,1,7), strftime('%Y-%m', COALESCE(original_started_at, started_at), '+9 hours')) = ?
   `).bind(userId, monthStr).all<{ total_seconds: number; subject: string }>();
 
   // 教科別秒数アキュムレータ（浮動小数で正確に積算）
@@ -259,7 +259,7 @@ stats.get('/subjects', async (c) => {
 // 計算ルール:
 //   - 対象: status='finished' かつ subject IS NOT NULL（記録保存済みセッション）
 //   - 1日に1回でも記録保存したらその日を「達成日」とカウント
-//   - 日付は JST 基準 (date(started_at, '+9 hours'))
+//   - 日付は JST 基準 (COALESCE(study_date, date(COALESCE(original_started_at, started_at), '+9 hours')))
 //   - current_streak: 今日(JST)から遡って連続している日数
 //     ※今日に記録があれば今日を含む、なければ昨日から遡る
 //   - best_streak: 全期間の最大連続記録日数
@@ -275,7 +275,7 @@ stats.get('/streak', async (c) => {
 
   // 記録がある全日付リストを JST で取得（降順）
   const rows = await db.prepare(`
-    SELECT DISTINCT date(started_at, '+9 hours') AS jst_date
+    SELECT DISTINCT COALESCE(study_date, date(COALESCE(original_started_at, started_at), '+9 hours')) AS jst_date
     FROM study_sessions
     WHERE user_id = ?
       AND status  = 'finished'
@@ -373,8 +373,8 @@ stats.get('/streak', async (c) => {
 // 計算ルール:
 //   - 対象: status='finished' かつ subject IS NOT NULL（記録保存済みセッション）
 //   - 1日に1回以上記録があればその日を「勉強達成」とする
-//   - 日付は JST 基準 (date(started_at, '+9 hours'))
-//   - 今月分のみ返す (strftime('%Y-%m', started_at, '+9 hours') = 今月YYYY-MM)
+//   - 日付は JST 基準 (COALESCE(study_date, date(COALESCE(original_started_at, started_at), '+9 hours')))
+//   - 今月分のみ返す (COALESCE(substr(study_date,1,7), strftime('%Y-%m', COALESCE(original_started_at, started_at), '+9 hours')) = 今月YYYY-MM)
 // =============================================
 stats.get('/calendar', async (c) => {
   const userId = c.get('userId');
@@ -389,12 +389,12 @@ stats.get('/calendar', async (c) => {
 
   // 今月の勉強達成日付を取得（DISTINCT で1日1件に絞る）
   const rows = await db.prepare(`
-    SELECT DISTINCT date(started_at, '+9 hours') AS jst_date
+    SELECT DISTINCT COALESCE(study_date, date(COALESCE(original_started_at, started_at), '+9 hours')) AS jst_date
     FROM study_sessions
     WHERE user_id = ?
       AND status  = 'finished'
       AND subject IS NOT NULL
-      AND strftime('%Y-%m', started_at, '+9 hours') = ?
+      AND COALESCE(substr(study_date,1,7), strftime('%Y-%m', COALESCE(original_started_at, started_at), '+9 hours')) = ?
     ORDER BY jst_date ASC
   `).bind(userId, monthStr).all<{ jst_date: string }>();
 

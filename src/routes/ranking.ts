@@ -158,7 +158,7 @@ ranking.get('/', async (c) => {
     JOIN users u ON u.id = ss.user_id
     WHERE ss.status  = 'finished'
       AND ss.subject IS NOT NULL
-      AND date(ss.started_at, '+9 hours') = ?
+      AND COALESCE(ss.study_date, date(COALESCE(ss.original_started_at, ss.started_at), '+9 hours')) = ?
     GROUP BY ss.user_id
   `).bind(todayStr).all<{ user_id: string; display_name: string; today_seconds: number }>();
 
@@ -182,8 +182,8 @@ ranking.get('/', async (c) => {
     JOIN users u ON u.id = ss.user_id
     WHERE ss.status  = 'finished'
       AND ss.subject IS NOT NULL
-      AND date(ss.started_at, '+9 hours') >= ?
-      AND date(ss.started_at, '+9 hours') <= ?
+      AND COALESCE(ss.study_date, date(COALESCE(ss.original_started_at, ss.started_at), '+9 hours')) >= ?
+      AND COALESCE(ss.study_date, date(COALESCE(ss.original_started_at, ss.started_at), '+9 hours')) <= ?
     GROUP BY ss.user_id
     ORDER BY seconds DESC
   `).bind(mondayStr, sundayStr).all<{ user_id: string; display_name: string; seconds: number }>();
@@ -223,7 +223,7 @@ ranking.get('/', async (c) => {
     JOIN users u ON u.id = ss.user_id
     WHERE ss.status  = 'finished'
       AND ss.subject IS NOT NULL
-      AND strftime('%Y-%m', ss.started_at, '+9 hours') = ?
+      AND COALESCE(substr(ss.study_date,1,7), strftime('%Y-%m', COALESCE(ss.original_started_at, ss.started_at), '+9 hours')) = ?
     GROUP BY ss.user_id
     ORDER BY seconds DESC
   `).bind(monthStr).all<{ user_id: string; display_name: string; seconds: number }>();
@@ -256,7 +256,7 @@ ranking.get('/', async (c) => {
     JOIN users u ON u.id = ss.user_id
     WHERE ss.status  = 'finished'
       AND ss.subject IS NOT NULL
-      AND strftime('%Y-%m', ss.started_at, '+9 hours') = ?
+      AND COALESCE(substr(ss.study_date,1,7), strftime('%Y-%m', COALESCE(ss.original_started_at, ss.started_at), '+9 hours')) = ?
     GROUP BY ss.user_id
     ORDER BY seconds DESC
   `).bind(lastMonthStr).all<{ user_id: string; display_name: string; seconds: number }>();

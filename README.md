@@ -1,171 +1,22 @@
-# 🌸 花はな Learning Timer
+# 花はな Learning Timer
 
-中学生向け勉強時間管理アプリ（ユーザー管理基盤）
+正式URL：https://hanahana-learning-timer.pages.dev/
 
----
+2026-10-14の正式公開r2の修正を維持し、先生管理画面と90分・120分タイマーを拡張した開発ソースです。2026-10-15にユーザーがプレビューのデザイン・操作性と正式公開を承認しました。
 
-## プロジェクト概要
+## アプリとビルド
 
-- **アプリ名**: 花はな Learning Timer
-- **目的**: 中学生が勉強時間を記録・管理するためのアプリ
-- **現フェーズ**: ユーザー管理基盤（ログイン・登録・ログアウト）
-- **技術スタック**: Hono + TypeScript + Cloudflare Pages + D1 SQLite
+- `src/`：先生管理・学習タイマー・認証API。先生専用APIはサーバー側で認証と先生判定を行います。
+- `public/`：既存の静的資産。プレビュー専用URLや架空データは含みません。
+- `migrations/0010_teacher_management.sql`：先生管理の追加構造。0009とは独立です。
+- `vite.config.ts`：Cloudflare Pages Advanced Modeの公式Honoビルド設定。
 
----
+Node.js 24.21.0と固定の依存関係を使用し、`npm run build:management`でビルドします。出力は `build/pages-management-20261015/dist` の5ファイルです。旧r2出力を上書きしません。Mac側の履歴・保護コマンドは引き続き維持します。
 
-## 現在実装済みの機能
+## 本番運用
 
-| 機能 | 状態 |
-|------|------|
-| ユーザー新規登録 | ✅ 完成 |
-| ログイン | ✅ 完成 |
-| ログアウト | ✅ 完成 |
-| ホーム画面 | ✅ 完成 |
-| セッション管理（Cookie） | ✅ 完成 |
-| ユーザーデータ永続化（D1） | ✅ 完成 |
-| レスポンシブデザイン（SP対応） | ✅ 完成 |
+既存Pagesプロジェクト `hanahana-learning-timer`、既存D1 `hanahana-production`、binding `DB`を維持します。`REGISTRATION_PASSWORD`と`TEACHER_USER_ID`はCloudflareの既存Secretを使用し、ソースに実値を入れません。先生の完全削除時の再認証は、登録済み先生アカウントのパスワードで照合します。
 
----
+**0009は本番適用済みですが移行履歴表に未記録です。0009を再実行したり、自動migrations applyを実行したりしないでください。** 0010は本番構造・適用状況と最新の暗号化バックアップを確認してから、必要なときだけ単独適用します。
 
-## 今後追加予定の機能（未実装）
-
-- ⏱️ 勉強タイマー
-- 📝 勉強記録（科目・時間・メモ）
-- 🏆 ランキング
-- 📅 学習カレンダー
-- 🎯 目標設定（1日の目標時間）
-- 🔥 連続学習記録
-
----
-
-## APIエンドポイント
-
-| メソッド | パス | 説明 | 認証 |
-|----------|------|------|------|
-| POST | `/api/auth/register` | 新規ユーザー登録 | 不要 |
-| POST | `/api/auth/login` | ログイン | 不要 |
-| POST | `/api/auth/logout` | ログアウト | 必要 |
-| GET | `/api/auth/me` | ログイン中ユーザー情報取得 | 必要 |
-
-### リクエスト例
-
-**新規登録**
-```json
-POST /api/auth/register
-{
-  "user_id": "hanako123",
-  "password": "mypassword",
-  "display_name": "はなこ"
-}
-```
-
-**ログイン**
-```json
-POST /api/auth/login
-{
-  "user_id": "hanako123",
-  "password": "mypassword"
-}
-```
-
----
-
-## データ設計
-
-### usersテーブル
-| カラム | 型 | 説明 |
-|--------|-----|------|
-| id | INTEGER PK | 自動採番 |
-| user_id | TEXT UNIQUE | ログイン用ID |
-| password_hash | TEXT | SHA-256ハッシュ |
-| display_name | TEXT | 表示名 |
-| created_at | DATETIME | 登録日時 |
-| is_active | INTEGER | 有効フラグ |
-
-### sessionsテーブル
-| カラム | 型 | 説明 |
-|--------|-----|------|
-| id | INTEGER PK | 自動採番 |
-| session_token | TEXT UNIQUE | セッショントークン |
-| user_id | INTEGER FK | ユーザーID |
-| expires_at | DATETIME | 有効期限（7日） |
-
----
-
-## プロジェクト構造
-
-```
-webapp/
-├── src/
-│   ├── index.tsx          # メインエントリー＋フロントエンドHTML
-│   ├── routes/
-│   │   └── auth.ts        # 認証APIルート
-│   ├── middleware/
-│   │   └── auth.ts        # 認証ミドルウェア
-│   ├── utils/
-│   │   ├── crypto.ts      # パスワードハッシュ・セッション生成
-│   │   └── validation.ts  # 入力バリデーション
-│   └── types/
-│       └── index.ts       # 型定義
-├── migrations/
-│   └── 0001_initial_schema.sql  # DBスキーマ
-├── public/                # 静的ファイル（今後追加）
-├── ecosystem.config.cjs   # PM2設定
-├── wrangler.jsonc         # Cloudflare設定
-├── package.json
-└── tsconfig.json
-```
-
----
-
-## ローカル開発
-
-```bash
-# 依存関係インストール
-npm install
-
-# DBマイグレーション（初回）
-npm run db:migrate:local
-
-# ビルド
-npm run build
-
-# 開発サーバー起動（PM2）
-pm2 start ecosystem.config.cjs
-
-# ログ確認
-pm2 logs hanahana-learning-timer --nostream
-```
-
----
-
-## 本番デプロイ（Cloudflare Pages）
-
-```bash
-# Cloudflare D1データベース作成（初回のみ）
-npx wrangler d1 create hanahana-production
-
-# wrangler.jsoncのdatabase_idを更新後:
-npm run db:migrate:prod
-
-# デプロイ
-npm run deploy:prod
-```
-
----
-
-## デザイン仕様
-
-- **メインカラー**: ピンク (#f472b6) → パープル (#a78bfa) グラデーション
-- **背景**: 薄いピンク (#fdf2f8)
-- **フォント**: ヒラギノ角ゴシック / メイリオ
-- **ブレークポイント**: スマートフォンファースト設計
-
----
-
-## デプロイ状況
-
-- **プラットフォーム**: Cloudflare Pages（準備済み）
-- **開発サーバー**: http://localhost:3000
-- **ステータス**: 🟡 ローカル動作確認済み（本番未デプロイ）
-- **最終更新**: 2026-04-01
+今回の機能・検証・公開手順は [正式公開の引き継ぎ](handoff/teacher-management-release-20261015.md) を参照してください。過去の第20段階の文書・確認番号は履歴です。実DB、バックアップ、秘密情報、プレビュー専用データは公開リポジトリに保存しません。

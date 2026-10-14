@@ -9,13 +9,10 @@ import { Hono } from 'hono'
 import { hashPassword, verifyPassword, generateSessionToken, getSessionExpiry } from '../utils/crypto'
 import { validateUserId, validatePassword, validateDisplayName } from '../utils/validation'
 import { authMiddleware } from '../middleware/auth'
+import { registrationPasswordMatches, isTeacherUser } from '../utils/auth-settings'
 import type { Bindings, Variables, UserRecord } from '../types'
 
 const auth = new Hono<{ Bindings: Bindings; Variables: Variables }>()
-
-// 登録用パスワード（管理者が設定）
-// 本番運用時は環境変数（c.env.REGISTRATION_PASSWORD）に移行することを推奨
-const REGISTRATION_PASSWORD = 'hanahana2026';
 
 // =============================================
 // POST /api/auth/register - 新規登録
@@ -28,7 +25,7 @@ auth.post('/register', async (c) => {
     // ─────────────────────────────────────────
     // 登録用パスワードチェック（最初に検証）
     // ─────────────────────────────────────────
-    if (!registration_password || registration_password !== REGISTRATION_PASSWORD) {
+    if (!registrationPasswordMatches(c.env, registration_password)) {
       return c.json({ success: false, error: '登録用パスワードが正しくありません' }, 403);
     }
 
@@ -90,6 +87,7 @@ auth.post('/register', async (c) => {
           id: userId,
           user_id: user_id.trim(),
           display_name: display_name.trim(),
+          is_teacher: isTeacherUser(c.env, user_id.trim()),
         }
       }
     }, 201);
@@ -122,7 +120,7 @@ auth.post('/login', async (c) => {
 
     // ユーザー検索
     const user = await db.prepare(
-      'SELECT * FROM users WHERE user_id = ? AND is_active = 1'
+      'SELECT * FROM users WHERE user_id = ? AND is_active = 1 AND archived_at IS NULL'
     ).bind(user_id.trim()).first<UserRecord & { password_hash: string }>();
 
     if (!user) {
@@ -170,6 +168,7 @@ auth.post('/login', async (c) => {
           user_id: user.user_id,
           display_name: user.display_name,
           created_at: user.created_at,
+          is_teacher: isTeacherUser(c.env, user.user_id),
         }
       }
     });
@@ -216,6 +215,7 @@ auth.get('/me', authMiddleware, async (c) => {
       user_id: user.user_id,
       display_name: user.display_name,
       created_at: user.created_at,
+      is_teacher: isTeacherUser(c.env, user.user_id),
       // 今後追加予定のフィールド:
       // goal_minutes: user.goal_minutes,
       // streak_days: user.streak_days,

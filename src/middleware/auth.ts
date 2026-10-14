@@ -41,10 +41,10 @@ export const authMiddleware = createMiddleware<{
 
     // ユーザー情報を取得
     const user = await db.prepare(
-      'SELECT id, user_id, display_name, created_at, updated_at, is_active FROM users WHERE id = ?'
+      'SELECT id, user_id, display_name, created_at, updated_at, is_active, archived_at FROM users WHERE id = ?'
     ).bind(session.user_id).first<UserRecord>();
 
-    if (!user || !user.is_active) {
+    if (!user || !user.is_active || user.archived_at) {
       return c.json({ success: false, error: 'ユーザーが見つかりません' }, 401);
     }
 

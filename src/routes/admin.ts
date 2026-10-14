@@ -1,13 +1,13 @@
 // =============================================
 // 花はな Learning Timer - 先生用管理画面 API
-// /api/admin/* - hiro0808 専用（認証必須）
+// /api/admin/* - サーバー設定で指定した先生専用（認証必須）
 // =============================================
 
 import { Hono } from 'hono'
 import { authMiddleware } from '../middleware/auth'
+import { isTeacherUser } from '../utils/auth-settings'
+import managementRoutes from './admin-management'
 import type { Bindings, Variables } from '../types'
-
-const TEACHER_USER_ID = 'hiro0808'
 
 const admin = new Hono<{ Bindings: Bindings; Variables: Variables }>()
 
@@ -21,7 +21,7 @@ admin.use('*', async (c, next) => {
     'SELECT user_id FROM users WHERE id = ?'
   ).bind(userId).first<{ user_id: string }>()
 
-  if (!user || user.user_id !== TEACHER_USER_ID) {
+  if (!user || !isTeacherUser(c.env, user.user_id)) {
     return c.json({ success: false, error: '先生アカウントのみアクセスできます' }, 403)
   }
   await next()
@@ -29,7 +29,7 @@ admin.use('*', async (c, next) => {
 
 // =============================================
 // GET /api/admin/students
-// 生徒一覧（hiro0808 以外の全ユーザー）
+// 生徒一覧（設定された先生以外の全ユーザー）
 // =============================================
 admin.get('/students', async (c) => {
   const db = c.env.DB
@@ -50,17 +50,19 @@ admin.get('/students', async (c) => {
         FROM study_sessions ss
         WHERE ss.user_id = u.id
           AND ss.status = 'finished'
+          AND ss.subject IS NOT NULL
       ) AS total_sessions,
       (
         SELECT COALESCE(SUM(ss2.total_seconds), 0)
         FROM study_sessions ss2
         WHERE ss2.user_id = u.id
           AND ss2.status = 'finished'
+          AND ss2.subject IS NOT NULL
       ) AS total_seconds_all
     FROM users u
     WHERE u.user_id != ?
     ORDER BY u.display_name ASC
-  `).bind(TEACHER_USER_ID).all<{
+  `).bind(c.env.TEACHER_USER_ID).all<{
     id: number
     user_id: string
     display_name: string
@@ -100,24 +102,23 @@ admin.get('/student/:studentUserId/stats', async (c) => {
   mondayJST.setUTCDate(nowJST.getUTCDate() - daysFromMonday)
   const weekStartJST = mondayJST.toISOString().slice(0, 10)
 
-  // 今月1日（JST）
-  const monthStartJST = todayJST.slice(0, 7) + '-01'
-
   const stats = await db.prepare(`
     SELECT
-      COALESCE(SUM(CASE WHEN date(started_at, '+9 hours') = ? THEN total_seconds ELSE 0 END), 0) AS today_seconds,
-      COALESCE(SUM(CASE WHEN date(started_at, '+9 hours') >= ? THEN total_seconds ELSE 0 END), 0) AS week_seconds,
-      COALESCE(SUM(CASE WHEN date(started_at, '+9 hours') >= ? THEN total_seconds ELSE 0 END), 0) AS month_seconds,
+      COALESCE(SUM(CASE WHEN COALESCE(study_date, date(COALESCE(original_started_at, started_at), '+9 hours')) = ? THEN total_seconds ELSE 0 END), 0) AS today_seconds,
+      COALESCE(SUM(CASE WHEN COALESCE(study_date, date(COALESCE(original_started_at, started_at), '+9 hours')) >= ?
+        AND COALESCE(study_date, date(COALESCE(original_started_at, started_at), '+9 hours')) <= ? THEN total_seconds ELSE 0 END), 0) AS week_seconds,
+      COALESCE(SUM(CASE WHEN COALESCE(substr(study_date,1,7), strftime('%Y-%m', COALESCE(original_started_at, started_at), '+9 hours')) = ? THEN total_seconds ELSE 0 END), 0) AS month_seconds,
       COALESCE(SUM(total_seconds), 0) AS total_seconds
     FROM study_sessions
     WHERE user_id = ?
       AND status = 'finished'
-  `).bind(todayJST, weekStartJST, monthStartJST, student.id)
+      AND subject IS NOT NULL
+  `).bind(todayJST, weekStartJST, todayJST, todayJST.slice(0, 7), student.id)
     .first<{ today_seconds: number; week_seconds: number; month_seconds: number; total_seconds: number }>()
 
   // 連続記録・自己ベスト（stats.ts の /streak と完全同一ロジック）
   const streakRows = await db.prepare(`
-    SELECT DISTINCT date(started_at, '+9 hours') AS jst_date
+    SELECT DISTINCT COALESCE(study_date, date(COALESCE(original_started_at, started_at), '+9 hours')) AS jst_date
     FROM study_sessions
     WHERE user_id = ? AND status = 'finished' AND subject IS NOT NULL
     ORDER BY jst_date DESC
@@ -204,16 +205,17 @@ admin.get('/student/:studentUserId/calendar', async (c) => {
   }
 
   const nowJST = new Date(Date.now() + 9 * 60 * 60 * 1000)
-  const monthStartJST = nowJST.toISOString().slice(0, 7) + '-01'
+  const monthStr = nowJST.toISOString().slice(0, 7)
 
   const rows = await db.prepare(`
-    SELECT DISTINCT date(started_at, '+9 hours') AS study_date
+    SELECT DISTINCT COALESCE(study_date, date(COALESCE(original_started_at, started_at), '+9 hours')) AS study_date
     FROM study_sessions
     WHERE user_id = ?
       AND status = 'finished'
-      AND date(started_at, '+9 hours') >= ?
+      AND subject IS NOT NULL
+      AND COALESCE(substr(study_date,1,7), strftime('%Y-%m', COALESCE(original_started_at, started_at), '+9 hours')) = ?
     ORDER BY study_date ASC
-  `).bind(student.id, monthStartJST).all<{ study_date: string }>()
+  `).bind(student.id, monthStr).all<{ study_date: string }>()
 
   return c.json({ success: true, data: rows.results.map(r => r.study_date) })
 })
@@ -245,7 +247,7 @@ admin.get('/student/:studentUserId/subjects', async (c) => {
     WHERE user_id = ?
       AND status = 'finished'
       AND subject IS NOT NULL
-      AND strftime('%Y-%m', started_at, '+9 hours') = ?
+      AND COALESCE(substr(study_date,1,7), strftime('%Y-%m', COALESCE(original_started_at, started_at), '+9 hours')) = ?
   `).bind(student.id, monthStr).all<{ subject: string; total_seconds: number }>()
 
   // stats.ts と同じ按分ロジック
@@ -291,12 +293,12 @@ admin.get('/student/:studentUserId/sessions', async (c) => {
   }
 
   const rows = await db.prepare(`
-    SELECT id, subject, memo, started_at, finished_at, total_seconds, status, auto_stopped
+    SELECT id, subject, memo, COALESCE(original_started_at, started_at) AS started_at, finished_at, total_seconds, status, auto_stopped
     FROM study_sessions
     WHERE user_id = ?
       AND status = 'finished'
       AND subject IS NOT NULL
-    ORDER BY started_at DESC
+    ORDER BY COALESCE(original_started_at, started_at) DESC
     LIMIT ?
   `).bind(student.id, limit).all<{
     id: number
@@ -340,4 +342,5 @@ admin.get('/student/:studentUserId/logins', async (c) => {
   return c.json({ success: true, data: rows.results })
 })
 
+admin.route('/', managementRoutes)
 export default admin

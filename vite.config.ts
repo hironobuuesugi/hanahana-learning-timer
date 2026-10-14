@@ -1,17 +1,17 @@
 import build from '@hono/vite-build/cloudflare-pages'
-import devServer from '@hono/vite-dev-server'
-import adapter from '@hono/vite-dev-server/cloudflare'
 import { defineConfig } from 'vite'
 
+// ZIPのPages設定をビルド専用に限定。devserver/adapterは読み込まない。
 export default defineConfig({
+  envDir: false,
+  envFile: false,
+  cacheDir: 'cache/pages-build/vite',
   plugins: [
     build({
-      // アイコン・マニフェストをWorkerではなく静的ファイルとして配信
+      entry: 'src/index.tsx',
+      outputDir: './build/pages-management-20261015/dist',
+      emptyOutDir: false,
       staticPaths: ['/static/*', '/timer-1024.png', '/manifest.json'],
     }),
-    devServer({
-      adapter,
-      entry: 'src/index.tsx'
-    })
-  ]
+  ],
 })
