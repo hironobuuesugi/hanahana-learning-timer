@@ -2,6 +2,7 @@
 import { Hono } from 'hono';
 import type { Bindings, Variables, StudySessionRecord } from '../types';
 import { settleDue } from './timer';
+import { withSessionDetails } from '../utils/session-details';
 import { hashPassword, verifyPassword } from '../utils/crypto';
 import { eventStatement, jstToday, nowISO, snapshot, studySeconds, subjects, validDate, utcMillis } from '../utils/study-management';
 const management = new Hono<{
@@ -47,8 +48,8 @@ management.get('/student/:studentUserId/records', async (c) => {
     const rows = await c.env.DB.prepare(`SELECT ss.*,${dateSQL} AS learning_date FROM study_sessions ss
     WHERE ss.user_id=? AND ss.status='finished' AND ss.subject IS NOT NULL
     ${month ? `AND substr(${dateSQL},1,7)=?` : ''} ORDER BY learning_date DESC,ss.id DESC LIMIT 31 OFFSET ?`)
-        .bind(s.id, ...(month ? [month] : []), offset).all();
-    return c.json({ success: true, data: rows.results.slice(0, 30), has_more: rows.results.length > 30, student: s });
+        .bind(s.id, ...(month ? [month] : []), offset).all<StudySessionRecord>();
+    return c.json({ success: true, data: await withSessionDetails(c.env.DB, rows.results.slice(0, 30)), has_more: rows.results.length > 30, student: s });
 });
 management.post('/student/:studentUserId/records', async (c) => {
     const db = c.env.DB, s = await student(db, c.req.param('studentUserId'), c.env.TEACHER_USER_ID);
@@ -68,10 +69,10 @@ management.post('/student/:studentUserId/records', async (c) => {
     const nominal = new Date(b.study_date + 'T00:00:00+09:00').toISOString(), token = requestKey, now = nowISO();
     const after = { study_date: b.study_date, total_seconds: b.total_seconds, subject, memo: b.memo.trim(), record_source: 'teacher' };
     const result = await db.batch([
-        db.prepare(`INSERT INTO study_sessions(user_id,status,started_at,original_started_at,finished_at,total_seconds,subject,memo,study_date,record_source,operation_token,updated_at)
-      SELECT ?,'finished',?,?,?, ?,?,?,?,'teacher',?,? WHERE EXISTS(SELECT 1 FROM users WHERE id=? AND archived_at IS NULL AND management_revision=?)
+        db.prepare(`INSERT INTO study_sessions(user_id,status,started_at,original_started_at,finished_at,total_seconds,subject,memo,study_date,record_source,operation_token,updated_at,saved_at)
+      SELECT ?,'finished',?,?,?, ?,?,?,?,'teacher',?,?,? WHERE EXISTS(SELECT 1 FROM users WHERE id=? AND archived_at IS NULL AND management_revision=?)
       AND NOT EXISTS(SELECT 1 FROM management_events WHERE request_key=?)`)
-            .bind(s.id, nominal, nominal, now, b.total_seconds, subject, b.memo.trim(), b.study_date, token, now, s.id, s.management_revision,requestKey),
+            .bind(s.id, nominal, nominal, now, b.total_seconds, subject, b.memo.trim(), b.study_date, token, now, now, s.id, s.management_revision,requestKey),
         db.prepare(`INSERT INTO management_events(actor_user_id,target_user_id,session_id,action,after_json,reason,occurred_at,request_key)
       SELECT ?,user_id,id,'record_add',?,?,?,? FROM study_sessions WHERE operation_token=? AND NOT EXISTS(SELECT 1 FROM management_events WHERE request_key=?)`)
             .bind(c.get('userId'), JSON.stringify(after), reasonText(b.reason), now,requestKey, token,requestKey),
@@ -131,9 +132,11 @@ management.get('/timers', async (c) => {
         student_user_id: string;
         display_name: string;
     }>();
-    const data = await Promise.all(rows.results.map(async (row) => ({ ...row, measured_seconds: await studySeconds(db, row),
-        elapsed_seconds: Math.max(0, Math.floor((Date.now() - utcMillis(row.original_started_at ?? row.started_at)) / 1000)),
-        stopped_seconds: ['paused', 'frozen', 'finished'].includes(row.status) ? Math.max(0, Math.floor((Date.now() - utcMillis(row.status === 'finished' ? row.finished_at! : row.status === 'frozen' ? row.frozen_at! : row.updated_at)) / 1000)) : null })));
+    const observed = Date.now();
+    const data = await Promise.all((await withSessionDetails(db, rows.results, observed)).map(async row => ({ ...row,
+        measured_seconds: await studySeconds(db, row, observed),
+        waiting_seconds: row.status === 'finished' && row.finished_at ? Math.max(0, Math.floor((observed - utcMillis(row.finished_at)) / 1000)) : null,
+    })));
     return c.json({ success: true, data, observed_at: nowISO() });
 });
 management.post('/timers/:id/finish', async (c) => {
@@ -168,9 +171,9 @@ management.post('/timers/:id/record', async (c) => {
         return c.json({success:false,error:'5分以上・元の未保存時間以下で指定してください'},422);
     const token = crypto.randomUUID(), after = { ...snapshot(row), subject, memo: b.memo.trim(),total_seconds:seconds,auto_stop_seconds:row.auto_stopped?(row.auto_stop_seconds??row.total_seconds):row.auto_stop_seconds };
     const result = await db.batch([
-        db.prepare(`UPDATE study_sessions SET subject=?,memo=?,total_seconds=?,auto_stop_seconds=CASE WHEN auto_stopped=1 THEN COALESCE(auto_stop_seconds,total_seconds) ELSE auto_stop_seconds END,updated_at=?,revision=revision+1,operation_token=? WHERE id=? AND revision=? AND status='finished' AND subject IS NULL
+        db.prepare(`UPDATE study_sessions SET subject=?,memo=?,total_seconds=?,auto_stop_seconds=CASE WHEN auto_stopped=1 THEN COALESCE(auto_stop_seconds,total_seconds) ELSE auto_stop_seconds END,saved_at=COALESCE(saved_at,?),updated_at=?,revision=revision+1,operation_token=? WHERE id=? AND revision=? AND status='finished' AND subject IS NULL
       AND id=(SELECT id FROM study_sessions WHERE user_id=? AND status='finished' AND subject IS NULL AND total_seconds>=300 ORDER BY finished_at,id LIMIT 1)`)
-            .bind(subject, b.memo.trim(),seconds, nowISO(), token, row.id, row.revision, row.user_id),
+            .bind(subject, b.memo.trim(),seconds, nowISO(), nowISO(), token, row.id, row.revision, row.user_id),
         eventStatement(db, c.get('userId'), row.user_id, row.id, 'teacher_record', snapshot(row), after, reasonText(b.reason), token),
     ]);
     if (result[0].meta.changes !== 1)
@@ -178,31 +181,43 @@ management.post('/timers/:id/record', async (c) => {
     return c.json({ success: true, message: '学習記録を保存しました' });
 });
 const attention = (alias='') => `(${alias}action IN ('auto_stop','time_review') OR (${alias}action IN ('record_edit','teacher_record') AND json_extract(${alias}before_json,'$.auto_stopped')=1 AND json_extract(${alias}before_json,'$.total_seconds') IS NOT json_extract(${alias}after_json,'$.total_seconds')))`;
-management.get('/attention', async (c) => {
-    const db = c.env.DB, teacher = c.get('userId');
-    // 初回導入は現在までを既読の基点にする。過去履歴そのものは保存・表示する。
+const unreadAttention = () => `${attention('e.')} AND e.id=(SELECT MAX(e2.id) FROM management_events e2 WHERE e2.session_id=e.session_id AND e2.id<=? AND ${attention('e2.')})
+  AND e.id<=? AND e.id>MAX(COALESCE((SELECT last_event_id FROM teacher_event_reads WHERE teacher_user_id=?),0),
+  COALESCE((SELECT last_event_id FROM teacher_student_event_reads WHERE teacher_user_id=? AND student_user_id=e.target_user_id),0))`;
+management.get('/attention', async c => {
+    const db=c.env.DB, teacher=c.get('userId'), offset=Number(c.req.query('offset')??0);
+    if(!Number.isSafeInteger(offset)||offset<0) return c.json({success:false,error:'検索条件が正しくありません'},400);
     await db.prepare(`INSERT OR IGNORE INTO teacher_event_reads(teacher_user_id,last_event_id) SELECT ?,COALESCE(MAX(id),0) FROM management_events WHERE json_extract(after_json,'$.legacy')=1`).bind(teacher).run();
-    const offset = Number(c.req.query('offset') ?? 0);
-    if (!Number.isSafeInteger(offset) || offset < 0)
-        return c.json({ success: false, error: '検索条件が正しくありません' }, 400);
-    const rows = await db.prepare(`SELECT e.*,u.user_id AS student_user_id,u.display_name,ss.subject,ss.total_seconds,ss.status,
-      ss.auto_stop_seconds,COALESCE(ss.study_date,date(COALESCE(ss.original_started_at,ss.started_at),'+9 hours')) AS learning_date
-    FROM management_events e JOIN users u ON u.id=e.target_user_id LEFT JOIN study_sessions ss ON ss.id=e.session_id
-    WHERE ${attention('e.')} AND e.id=(SELECT MAX(e2.id) FROM management_events e2 WHERE e2.session_id=e.session_id AND ${attention('e2.')}) ORDER BY e.id DESC LIMIT 31 OFFSET ?`).bind(offset).all();
-    const count = await db.prepare(`SELECT COUNT(DISTINCT session_id) AS count FROM management_events WHERE ${attention()} AND id>(SELECT last_event_id FROM teacher_event_reads WHERE teacher_user_id=?)`).bind(teacher).first<{
-        count: number;
-    }>();
-    const max = await db.prepare(`SELECT COALESCE(MAX(id),0) AS id FROM management_events WHERE ${attention()}`).first<{
-        id: number;
-    }>();
-    return c.json({ success: true, data: rows.results.slice(0, 30), has_more: rows.results.length > 30, new_count: count?.count ?? 0, read_through: max?.id ?? 0 });
+    const max=await db.prepare('SELECT COALESCE(MAX(id),0) AS id FROM management_events').first<{id:number}>();
+    const through=max?.id??0;
+    const rows=await db.prepare(`SELECT e.*,u.user_id AS student_user_id,u.display_name,ss.subject,ss.total_seconds,ss.status,ss.auto_stop_seconds,
+      COALESCE(ss.study_date,date(COALESCE(ss.original_started_at,ss.started_at),'+9 hours')) AS learning_date
+      FROM management_events e JOIN users u ON u.id=e.target_user_id LEFT JOIN study_sessions ss ON ss.id=e.session_id
+      WHERE ${unreadAttention()} ORDER BY e.id DESC LIMIT 31 OFFSET ?`).bind(through,through,teacher,teacher,offset).all();
+    const count=await db.prepare(`SELECT COUNT(*) AS count FROM management_events e JOIN users u ON u.id=e.target_user_id WHERE ${unreadAttention()}`).bind(through,through,teacher,teacher).first<{count:number}>();
+
+    return c.json({success:true,data:rows.results.slice(0,30),has_more:rows.results.length>30,new_count:count?.count??0,read_through:max?.id??0});
 });
-management.post('/attention/read', async (c) => {
-    const b = await c.req.json().catch(() => null);
-    if (!b || !Number.isSafeInteger(b.read_through) || b.read_through < 0)
-        return c.json({ success: false, error: '既読位置が正しくありません' }, 400);
-    await c.env.DB.prepare(`UPDATE teacher_event_reads SET last_event_id=MAX(last_event_id,MIN(?,(SELECT COALESCE(MAX(id),0) FROM management_events))) WHERE teacher_user_id=?`).bind(b.read_through, c.get('userId')).run();
-    return c.json({ success: true });
+management.post('/attention/read', async c => {
+    const b=await c.req.json().catch(()=>null), db=c.env.DB;
+    if(!b||typeof b.student_user_id!=='string'||!Number.isSafeInteger(b.read_through)||b.read_through<0)
+      return c.json({success:false,error:'確認した生徒と既読位置を指定してください'},400);
+    const target=await student(db,b.student_user_id,c.env.TEACHER_USER_ID);
+    if(!target)return c.json({success:false,error:'生徒が見つかりません'},404);
+    await db.prepare(`INSERT INTO teacher_student_event_reads(teacher_user_id,student_user_id,last_event_id)
+      VALUES(?,?,MIN(?,(SELECT COALESCE(MAX(id),0) FROM management_events)))
+      ON CONFLICT(teacher_user_id,student_user_id) DO UPDATE SET last_event_id=MAX(last_event_id,excluded.last_event_id)`)
+      .bind(c.get('userId'),target.id,b.read_through).run();
+    return c.json({success:true});
+});
+management.post('/attention/read-all', async c => {
+    const b=await c.req.json().catch(()=>null);
+    if(!b||!Number.isSafeInteger(b.read_through)||b.read_through<0)return c.json({success:false,error:'確認対象の新着位置を指定してください'},400);
+    await c.env.DB.prepare(`INSERT INTO teacher_event_reads(teacher_user_id,last_event_id)
+      VALUES(?,MIN(?,(SELECT COALESCE(MAX(id),0) FROM management_events)))
+      ON CONFLICT(teacher_user_id) DO UPDATE SET last_event_id=MAX(last_event_id,excluded.last_event_id)`)
+      .bind(c.get('userId'),b.read_through).run();
+    return c.json({success:true,message:'すべて既読にしました'});
 });
 management.get('/history', async (c) => {
     const offset = Number(c.req.query('offset') ?? 0);

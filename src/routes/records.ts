@@ -30,6 +30,8 @@
 
 import { Hono } from 'hono'
 import { authMiddleware } from '../middleware/auth'
+import { withSessionDetails } from '../utils/session-details'
+import type { StudySessionRecord } from '../types'
 import type { Bindings, Variables } from '../types'
 
 const records = new Hono<{ Bindings: Bindings; Variables: Variables }>()
@@ -47,28 +49,17 @@ records.get('/', async (c) => {
   // ログインユーザー本人の記録のみ、新しい順で取得
   // subject が NULL でないもの＝記録入力済みセッションのみ
   const rows = await db.prepare(`
-    SELECT
-      id,
-      COALESCE(original_started_at, started_at) AS started_at,
-      total_seconds, study_date, record_source, auto_stopped, auto_stop_seconds, time_limit_seconds,
-      subject,
-      memo
+    SELECT *
     FROM study_sessions
     WHERE user_id    = ?
       AND status     = 'finished'
       AND subject    IS NOT NULL
     ORDER BY COALESCE(study_date, date(COALESCE(original_started_at, started_at), '+9 hours')) DESC, id DESC
-  `).bind(userId).all<{
-    id: number
-    started_at: string
-    total_seconds: number
-    subject: string
-    memo: string | null
-  }>()
+  `).bind(userId).all<StudySessionRecord>()
 
   return c.json({
     success: true,
-    data: rows.results ?? [],
+    data: (await withSessionDetails(db, rows.results ?? [])).map(row => ({ ...row, started_at: row.original_started_at ?? row.started_at })),
   })
 })
 

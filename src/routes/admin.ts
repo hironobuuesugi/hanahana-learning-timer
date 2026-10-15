@@ -7,6 +7,7 @@ import { Hono } from 'hono'
 import { authMiddleware } from '../middleware/auth'
 import { isTeacherUser } from '../utils/auth-settings'
 import managementRoutes from './admin-management'
+import sharedTestdate from './shared-testdate'
 import type { Bindings, Variables } from '../types'
 
 const admin = new Hono<{ Bindings: Bindings; Variables: Variables }>()
@@ -343,4 +344,5 @@ admin.get('/student/:studentUserId/logins', async (c) => {
 })
 
 admin.route('/', managementRoutes)
+admin.route('/testdate', sharedTestdate)
 export default admin

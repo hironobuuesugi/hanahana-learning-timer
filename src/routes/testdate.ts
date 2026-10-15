@@ -1,67 +1,14 @@
-// =============================================
-// 花はな Learning Timer - テスト日APIルート
-//
-// GET  /api/testdate  - ログインユーザーのテスト日を返す
-// POST /api/testdate  - ログインユーザーのテスト日を保存（UPSERT）
-//
-// テスト日は1ユーザーにつき1件のみ保持する。
-// =============================================
-
 import { Hono } from 'hono'
 import { authMiddleware } from '../middleware/auth'
+import { isTeacherUser } from '../utils/auth-settings'
 import type { Bindings, Variables } from '../types'
-
 const testdate = new Hono<{ Bindings: Bindings; Variables: Variables }>()
-
-// 全エンドポイントに認証を適用
 testdate.use('*', authMiddleware)
-
-// =============================================
-// GET /api/testdate - テスト日取得
-// =============================================
-testdate.get('/', async (c) => {
-  const userId = c.get('userId')
-  const db     = c.env.DB
-
-  const row = await db.prepare(`
-    SELECT test_date FROM user_test_dates WHERE user_id = ?
-  `).bind(userId).first<{ test_date: string }>()
-
-  return c.json({
-    success:   true,
-    test_date: row?.test_date ?? null,
-  })
+testdate.get('/', async c => {
+  c.header('Cache-Control','no-store')
+  const row=await c.env.DB.prepare('SELECT test_date,is_visible,display_message,message_visible FROM shared_test_date WHERE id=1').first<{test_date:string|null;is_visible:number;display_message:string;message_visible:number}>()
+  const visible=!!row?.is_visible&&!isTeacherUser(c.env,c.get('userInfo').user_id)
+  return c.json({success:true,managed:true,test_date:visible?row?.test_date??null:null,display_message:visible&&row?.message_visible?row.display_message:''})
 })
-
-// =============================================
-// POST /api/testdate - テスト日保存（UPSERT）
-// =============================================
-testdate.post('/', async (c) => {
-  const userId = c.get('userId')
-  const db     = c.env.DB
-
-  const body = await c.req.json().catch(() => ({})) as { test_date?: string }
-  const testDate = (body.test_date ?? '').trim()
-
-  // バリデーション: 日付未入力はエラー
-  if (!testDate) {
-    return c.json({ success: false, error: 'テスト日を入力してください' }, 400)
-  }
-
-  // UPSERT: 既存レコードがあれば更新、なければ挿入
-  await db.prepare(`
-    INSERT INTO user_test_dates (user_id, test_date, updated_at)
-    VALUES (?, ?, datetime('now'))
-    ON CONFLICT(user_id) DO UPDATE SET
-      test_date  = excluded.test_date,
-      updated_at = datetime('now')
-  `).bind(userId, testDate).run()
-
-  return c.json({
-    success:   true,
-    test_date: testDate,
-    message:   'テスト日を保存しました',
-  })
-})
-
+for(const method of ['post','put','patch','delete'] as const) testdate[method]('/', c => c.json({success:false,error:'テスト日は先生が共通設定します。生徒による変更はできません。'},403))
 export default testdate

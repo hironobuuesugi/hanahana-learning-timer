@@ -96,6 +96,8 @@ export type StudySessionRecord = {
   record_source: string;
   revision: number;
   operation_token: string | null;
+  saved_at: string | null;
+  history_tracked: number;
   subject: string | null;
   memo: string | null;
 }

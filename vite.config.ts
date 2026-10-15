@@ -9,7 +9,7 @@ export default defineConfig({
   plugins: [
     build({
       entry: 'src/index.tsx',
-      outputDir: './build/pages-management-20261015/dist',
+      outputDir: './build/pages-finish-20261016/dist',
       emptyOutDir: false,
       staticPaths: ['/static/*', '/timer-1024.png', '/manifest.json'],
     }),

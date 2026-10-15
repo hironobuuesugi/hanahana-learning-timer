@@ -11,6 +11,7 @@ import timerRoutes from './routes/timer'
 import statsRoutes from './routes/stats'
 import recordsRoutes from './routes/records'
 import testdateRoutes from './routes/testdate'
+import { sessionDetailsScript } from './ui/session-details'
 import rankingRoutes from './routes/ranking'
 import commentsRoutes from './routes/comments'
 import adminRoutes from './routes/admin'
@@ -514,35 +515,19 @@ app.get('*', (c) => {
       </div>
 
       <!-- テスト日カード -->
-      <div class="card p-4 mb-6" id="testdate-card">
+      <div class="card p-4 mb-6" id="testdate-card" style="display:none">
         <h3 class="text-sm font-medium text-gray-500 mb-3 flex items-center gap-2">
           <i class="fas fa-calendar-check text-orange-400"></i>
           テスト日
         </h3>
         <!-- 保存済みテスト日の表示 -->
         <div id="testdate-display" class="mb-3 hidden">
-          <div class="text-center py-1">
-            <p class="text-3xl font-bold text-orange-500 mb-1" id="testdate-countdown"></p>
-            <p class="text-sm font-medium text-orange-400" id="testdate-value">--</p>
+          <div class="text-center py-4">
+            <p class="text-4xl sm:text-5xl font-bold text-orange-500 mb-3 leading-tight" id="testdate-countdown"></p>
+            <p class="text-xl sm:text-2xl font-bold text-orange-400" id="testdate-value">--</p>
           </div>
         </div>
-        <!-- 入力フォーム -->
-        <div class="flex gap-2 items-center">
-          <input
-            type="date"
-            id="testdate-input"
-            class="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-orange-300 focus:ring-1 focus:ring-orange-200"
-          />
-          <button
-            id="testdate-save-btn"
-            onclick="saveTestDate()"
-            class="bg-orange-400 hover:bg-orange-500 text-white text-sm font-medium px-4 py-2 rounded-xl transition-colors whitespace-nowrap"
-          >保存</button>
-        </div>
-        <!-- 保存メッセージ（一時表示） -->
-        <p id="testdate-msg" class="text-xs text-green-600 mt-2 hidden"></p>
-        <!-- エラーメッセージ -->
-        <p id="testdate-err" class="text-xs text-red-500 mt-2 hidden"></p>
+        <p id="testdate-message" class="hidden text-center text-base font-medium text-orange-500 mt-3" style="white-space:pre-wrap;overflow-wrap:anywhere"></p>
       </div>
 
       <!-- 機能カード一覧（今後の機能を予告） -->
@@ -1126,7 +1111,7 @@ ${managementFooter}
           >
             <i class="fas fa-play"></i> スタート
           </button>
-<button id="btn-start-120" onclick="handleTimerStart(7200)" class="w-full bg-purple-50 text-purple-600 font-medium py-3 rounded-xl border border-purple-100">120分でスタート</button>
+<button id="btn-start-120" onclick="handleTimerStart(7200)" class="w-full bg-purple-100 hover:bg-purple-200 text-purple-700 font-bold py-3 rounded-xl border border-purple-300 flex items-center justify-center gap-2"><i class="fas fa-play" aria-hidden="true"></i> 120分でスタート</button>
 
           <!-- 一時停止ボタン -->
           <button
@@ -1447,6 +1432,8 @@ let currentUser = null;
 function showPage(pageId) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.getElementById(pageId).classList.add('active');
+  // ホームへ戻るたび共通設定を再取得。古い個別日付には戻さない。
+  if(pageId==='page-home'&&currentUser)fetchTestDate();
   // エラーメッセージをクリア
   clearMessages();
 }
@@ -2355,14 +2342,8 @@ function formatTestDateShort(dateStr) {
 
 // 今日からテスト日までの日数差を計算（テスト日 - 今日）
 function calcDaysUntilTest(dateStr) {
-  // 日付のみで比較するため時刻をゼロにする
-  var today = new Date();
-  var todayMidnight = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-  var parts = dateStr.split('-');
-  var testMidnight  = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
-  var diffMs   = testMidnight.getTime() - todayMidnight.getTime();
-  var diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
-  return diffDays;
+  var today = new Date(Date.now()+9*3600000).toISOString().slice(0,10);
+  return Math.round((Date.parse(dateStr+'T00:00:00+09:00')-Date.parse(today+'T00:00:00+09:00'))/86400000);
 }
 
 // 日数差を「🔥 あと◯日」テキストに変換
@@ -2372,7 +2353,9 @@ function formatCountdown(days) {
 }
 
 // テスト日の表示エリアを更新する共通関数
-function renderTestDateDisplay(dateVal) {
+function renderTestDateDisplay(dateVal, message) {
+  var messageEl=document.getElementById('testdate-message');
+  messageEl.textContent=dateVal&&message?message:'';messageEl.classList.toggle('hidden',!dateVal||!message);
   var displayEl    = document.getElementById('testdate-display');
   var valueEl      = document.getElementById('testdate-value');
   var countdownEl  = document.getElementById('testdate-countdown');
@@ -2386,67 +2369,19 @@ function renderTestDateDisplay(dateVal) {
 }
 
 // テスト日をAPIから取得してホーム画面に表示する
+var testdateFetchEpoch = 0;
 async function fetchTestDate() {
+  var epoch=++testdateFetchEpoch, card=document.getElementById('testdate-card');
+  card.style.display='none';renderTestDateDisplay(null);
   try {
-    var res  = await fetch('/api/testdate');
-    var json = await res.json();
-    if (!json.success) return;
-    renderTestDateDisplay(json.test_date);
-  } catch (e) {
-    console.warn('TestDate fetch error:', e);
-  }
+    var res=await fetch('/api/testdate',{cache:'no-store'}),json=await res.json();
+    if(epoch!==testdateFetchEpoch||!res.ok||!json.success||!json.managed||!json.test_date)return;
+    renderTestDateDisplay(json.test_date,json.display_message);card.style.display='';
+  } catch(e) { /* 通信不能時にも個別の日付へ戻さない */ }
 }
-
-// テスト日を保存する（バリデーション付き）
-async function saveTestDate() {
-  var inputEl = document.getElementById('testdate-input');
-  var msgEl   = document.getElementById('testdate-msg');
-  var errEl   = document.getElementById('testdate-err');
-  var btnEl   = document.getElementById('testdate-save-btn');
-
-  // メッセージをリセット
-  if (msgEl) { msgEl.textContent = ''; msgEl.classList.add('hidden'); }
-  if (errEl) { errEl.textContent = ''; errEl.classList.add('hidden'); }
-
-  var dateVal = inputEl ? inputEl.value.trim() : '';
-
-  // バリデーション: 日付未入力
-  if (!dateVal) {
-    if (errEl) { errEl.textContent = 'テスト日を入力してください'; errEl.classList.remove('hidden'); }
-    return;
-  }
-
-  // 保存中はボタンを無効化
-  if (btnEl) { btnEl.disabled = true; btnEl.textContent = '保存中...'; }
-
-  try {
-    var res = await fetch('/api/testdate', {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ test_date: dateVal }),
-    });
-    var json = await res.json();
-
-    if (json.success) {
-      // 表示を更新
-      renderTestDateDisplay(json.test_date);
-
-      // 成功メッセージを3秒表示
-      if (msgEl) {
-        msgEl.textContent = 'テスト日を保存しました';
-        msgEl.classList.remove('hidden');
-        setTimeout(function() { msgEl.classList.add('hidden'); }, 3000);
-      }
-    } else {
-      if (errEl) { errEl.textContent = json.error || '保存に失敗しました'; errEl.classList.remove('hidden'); }
-    }
-  } catch (e) {
-    if (errEl) { errEl.textContent = '通信エラーが発生しました'; errEl.classList.remove('hidden'); }
-    console.warn('TestDate save error:', e);
-  } finally {
-    if (btnEl) { btnEl.disabled = false; btnEl.textContent = '保存'; }
-  }
-}
+document.addEventListener('visibilitychange',function(){
+  if(document.visibilityState==='visible'&&currentUser&&document.getElementById('page-home').classList.contains('active'))fetchTestDate();
+});
 
 // =============================================
 // 勉強記録一覧ページ
@@ -2542,7 +2477,7 @@ function groupRecordsByDate(records) {
     }
 
     // 勉強内容を追加（空除外）。セッションIDと一緒に保持する
-    g.memos.push({ autoLabel: autoHistoryLabel(rec), id: rec.id, text: rec.memo ? rec.memo.trim() : '', totalSeconds: rec.total_seconds || 0 });
+    g.memos.push({ facts: sessionFactsHtml(rec,true), autoLabel: autoHistoryLabel(rec), id: rec.id, text: rec.memo ? rec.memo.trim() : '', totalSeconds: rec.total_seconds || 0 });
   });
 
   // dateKey の降順（新しい日が上）に並べて返す
@@ -2590,6 +2525,7 @@ function buildDayCard(group) {
         + '<button onclick="startEditMemo(' + sid + ')" title="編集" style="font-size:0.8rem;color:#9ca3af;border:1px solid #e5e7eb;border-radius:6px;padding:2px 6px;background:#f9fafb;white-space:nowrap;cursor:pointer;line-height:1.4;">✏️</button>'
         + '</div>'
         + (m.autoLabel ? '<p style="font-size:0.75rem;color:#b77938;margin:2px 0 10px;">' + escapeHtml(m.autoLabel) + '</p>' : '')
+        + (m.facts || '')
         + '<div id="memo-edit-' + sid + '" style="display:none;margin-bottom:6px;">'
         +   '<textarea id="memo-input-' + sid + '" rows="3" style="width:100%;font-size:0.875rem;border:1px solid #f9a8d4;border-radius:8px;padding:6px 8px;resize:vertical;box-sizing:border-box;">' + escapeHtml(txt) + '</textarea>'
         +   '<div style="display:flex;gap:6px;margin-top:4px;">'
@@ -3908,6 +3844,7 @@ async function initAdminPage() {
 
 // 生徒を選択したときにデータを読み込む
 async function loadAdminStudent(studentUserId) {
+  var detailEpoch=managementEpoch;
   var detail = document.getElementById('admin-student-detail');
   var loading = document.getElementById('admin-loading');
   if (!detail || !loading) return;
@@ -3934,6 +3871,7 @@ async function loadAdminStudent(studentUserId) {
       statsRes.json(), calRes.json(), subRes.json(), sessRes.json(), loginRes.json(),
     ]);
 
+    if(detailEpoch!==managementEpoch||managementStudent!==studentUserId)return;
     loading.classList.add('hidden');
     detail.classList.remove('hidden');
 
@@ -4057,6 +3995,7 @@ async function loadAdminStudent(studentUserId) {
     }
 
   } catch(e) {
+    if(detailEpoch!==managementEpoch||managementStudent!==studentUserId)return;
     console.error('loadAdminStudent error', e);
     loading.classList.add('hidden');
   }
@@ -4142,6 +4081,7 @@ function adjustRecordMinutes(delta){
   renderRecordReviewTime();
 }
 function updateTimerLimitNotice(elapsed){var warning=document.getElementById('timer-limit-warning');if(!warning){warning=document.createElement('p');warning.id='timer-limit-warning';warning.className='hidden bg-purple-50 text-purple-600 rounded-xl p-3 text-sm text-center mb-3';document.getElementById('timer-60min-warning').insertAdjacentElement('afterend',warning);}warning.textContent='自動停止まであと5分です（'+(timerLimit(timerState)/60)+'分モード）';warning.classList.toggle('hidden',elapsed<timerLimit(timerState)-300||elapsed>=timerLimit(timerState));}
+${sessionDetailsScript}
 ${managementScript}
 </script>
 </body>
