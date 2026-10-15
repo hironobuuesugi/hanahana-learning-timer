@@ -8,6 +8,8 @@ import { authMiddleware } from '../middleware/auth'
 import { isTeacherUser } from '../utils/auth-settings'
 import managementRoutes from './admin-management'
 import sharedTestdate from './shared-testdate'
+import subjectAnalysisRoutes from './subject-analysis'
+import { analysisMonth, subjectAnalysis } from '../utils/subject-allocation'
 import type { Bindings, Variables } from '../types'
 
 const admin = new Hono<{ Bindings: Bindings; Variables: Variables }>()
@@ -238,42 +240,11 @@ admin.get('/student/:studentUserId/subjects', async (c) => {
     return c.json({ success: false, error: '生徒が見つかりません' }, 404)
   }
 
-  const nowJST = new Date(Date.now() + 9 * 60 * 60 * 1000)
-  const monthStr = nowJST.toISOString().slice(0, 7) // YYYY-MM
+  const month = analysisMonth(c.req.query('month'));
+  if (!month) return c.json({success:false,error:'今月以前の年月、または累計を選んでください'},400);
+  const data = await subjectAnalysis(db,student.id,month);
+  return c.json({success:true,data:Object.entries(data.subjects).map(([subject,seconds])=>({subject,seconds})).filter(r=>r.seconds>0)});
 
-  // 今月の全セッションを取得（subject・total_seconds のみ）
-  const rows = await db.prepare(`
-    SELECT subject, total_seconds
-    FROM study_sessions
-    WHERE user_id = ?
-      AND status = 'finished'
-      AND subject IS NOT NULL
-      AND COALESCE(substr(study_date,1,7), strftime('%Y-%m', COALESCE(original_started_at, started_at), '+9 hours')) = ?
-  `).bind(student.id, monthStr).all<{ subject: string; total_seconds: number }>()
-
-  // stats.ts と同じ按分ロジック
-  const KNOWN_SUBJECTS = ['english', 'math', 'japanese', 'science', 'social', 'other']
-  const acc: Record<string, number> = {
-    english: 0, math: 0, japanese: 0, science: 0, social: 0, other: 0,
-  }
-
-  for (const row of rows.results ?? []) {
-    const codes = row.subject.split(',').map((s: string) => s.trim()).filter(Boolean)
-    if (codes.length === 0) continue
-    const share = row.total_seconds / codes.length
-    for (const code of codes) {
-      const key = KNOWN_SUBJECTS.includes(code) ? code : 'other'
-      acc[key] += share
-    }
-  }
-
-  // 0秒の教科は除外してリスト形式で返す（表示順固定）
-  const ORDER = ['english', 'math', 'japanese', 'science', 'social', 'other']
-  const result = ORDER
-    .map(code => ({ subject: code, seconds: Math.floor(acc[code]) }))
-    .filter(r => r.seconds > 0)
-
-  return c.json({ success: true, data: result })
 })
 
 // =============================================
@@ -345,4 +316,5 @@ admin.get('/student/:studentUserId/logins', async (c) => {
 
 admin.route('/', managementRoutes)
 admin.route('/testdate', sharedTestdate)
+admin.route('/subject-analysis', subjectAnalysisRoutes)
 export default admin

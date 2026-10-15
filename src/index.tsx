@@ -12,6 +12,8 @@ import statsRoutes from './routes/stats'
 import recordsRoutes from './routes/records'
 import testdateRoutes from './routes/testdate'
 import { sessionDetailsScript } from './ui/session-details'
+import { allocationStyles, allocationScript } from './ui/subject-allocation'
+import { studentSubjectPanel, analysisStyles, analysisScript } from './ui/subject-analysis'
 import rankingRoutes from './routes/ranking'
 import commentsRoutes from './routes/comments'
 import adminRoutes from './routes/admin'
@@ -84,6 +86,8 @@ app.get('*', (c) => {
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" />
   <style>
+${allocationStyles}
+${analysisStyles}
     /* カスタムカラーテーマ */
     :root {
       --color-primary: #f472b6;    /* ピンク（メインカラー） */
@@ -1000,18 +1004,8 @@ ${managementFooter}
       <!-- エラーメッセージ -->
       <div id="records-error" class="hidden bg-red-50 border border-red-200 rounded-lg p-3 mb-4 text-sm text-red-600"></div>
 
-      <!-- 今月の教科別勉強時間カード -->
-      <div id="subject-stats-card" class="hidden mb-5">
-        <div class="bg-white rounded-2xl shadow-sm p-4">
-          <div class="flex items-center gap-2 mb-3">
-            <span class="text-lg">📊</span>
-            <h2 class="font-bold text-gray-700 text-sm">今月の教科別勉強時間</h2>
-          </div>
-          <div id="subject-stats-list" class="space-y-2">
-            <!-- JS で描画 -->
-          </div>
-        </div>
-      </div>
+      <!-- 既存の教科別カードを期間選択・横棒分析へ拡張 -->
+      ${studentSubjectPanel}
 
       <!-- 記録なし -->
       <div id="records-empty" class="hidden text-center py-16">
@@ -1382,6 +1376,8 @@ ${managementFooter}
         </div>
       </div>
 
+      <p id="record-subject-limit" class="text-xs text-gray-400"></p>
+      <div id="record-allocation" class="hidden"></div>
       <!-- 勉強内容 -->
       <div>
         <label for="record-memo" class="block text-sm font-bold text-gray-700 mb-2">
@@ -2477,7 +2473,7 @@ function groupRecordsByDate(records) {
     }
 
     // 勉強内容を追加（空除外）。セッションIDと一緒に保持する
-    g.memos.push({ facts: sessionFactsHtml(rec,true), autoLabel: autoHistoryLabel(rec), id: rec.id, text: rec.memo ? rec.memo.trim() : '', totalSeconds: rec.total_seconds || 0 });
+    g.memos.push({ facts: allocationRecordHtml(rec,true)+sessionFactsHtml(rec,true), autoLabel: autoHistoryLabel(rec), id: rec.id, text: rec.memo ? rec.memo.trim() : '', totalSeconds: rec.total_seconds || 0 });
   });
 
   // dateKey の降順（新しい日が上）に並べて返す
@@ -2517,7 +2513,7 @@ function buildDayCard(group) {
       var sid = m.id;
       var txt = m.text || '';
       var durMin = Math.round((m.totalSeconds || 0) / 60);
-      var durLabel = durMin + '分';
+      var durLabel = allocationTime(m.totalSeconds || 0);
       return (
         '<div id="memo-view-' + sid + '" style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:6px;">'
         + '<span style="font-size:0.875rem;color:#4b5563;flex:1;white-space:pre-wrap;" id="memo-text-' + sid + '">' + escapeHtml(txt) + '</span>'
@@ -2653,65 +2649,8 @@ async function saveMemo(sid) {
 // =============================================
 
 // 教科コードの表示順と日本語ラベル
-const SUBJECT_ORDER = [
-  { code: 'english',  label: '英語' },
-  { code: 'math',     label: '数学' },
-  { code: 'japanese', label: '国語' },
-  { code: 'science',  label: '理科' },
-  { code: 'social',   label: '社会' },
-  { code: 'other',    label: 'その他' },
-];
-
-// 秒数を「X時間Y分」または「Y分」形式にフォーマット（0秒は「0分」）
-function formatSecondsSubject(seconds) {
-  var s = Math.floor(seconds);
-  var h = Math.floor(s / 3600);
-  var m = Math.floor((s % 3600) / 60);
-  if (h === 0 && m === 0) return '0分';
-  if (h === 0) return m + '分';
-  if (m === 0) return h + '時間';
-  return h + '時間' + m + '分';
-}
-
-// 教科別勉強時間カードを描画する
-// data: { english, math, japanese, science, social, other } (各秒数)
-function renderSubjectStats(data) {
-  var cardEl = document.getElementById('subject-stats-card');
-  var listEl = document.getElementById('subject-stats-list');
-  if (!cardEl || !listEl) return;
-
-  var rows = SUBJECT_ORDER.map(function(s) {
-    var sec = data[s.code] || 0;
-    var timeStr = formatSecondsSubject(sec);
-    // 記録がある教科はテキストを少し濃く
-    var valueColor = sec > 0 ? 'text-purple-600 font-bold' : 'text-gray-400';
-    return (
-      '<div class="flex items-center justify-between py-1 border-b border-gray-50 last:border-0">' +
-        '<span class="text-sm text-gray-600">' + s.label + '</span>' +
-        '<span class="text-sm ' + valueColor + '">' + timeStr + '</span>' +
-      '</div>'
-    );
-  }).join('');
-
-  listEl.innerHTML = rows;
-  cardEl.classList.remove('hidden');
-}
-
-// 今月教科別勉強時間を API から取得して描画する
-async function fetchAndRenderSubjectStats() {
-  var cardEl = document.getElementById('subject-stats-card');
-  if (cardEl) cardEl.classList.add('hidden');
-
-  try {
-    var res  = await fetch('/api/stats/subjects', { credentials: 'include' });
-    var json = await res.json();
-    if (json.success && json.data) {
-      renderSubjectStats(json.data);
-    }
-  } catch (e) {
-    // 教科別集計の取得失敗は静かに無視（記録一覧は引き続き表示）
-  }
-}
+// 同じ集計・表示部品を本人と先生の分析で共有する。
+async function fetchAndRenderSubjectStats() { return loadStudentSubjectAnalysis(); }
 
 async function initRecordsPage() {
   const loadingEl = document.getElementById('records-loading');
@@ -3444,6 +3383,7 @@ async function handleAbandonedFinish() {
 let recordSelectedSubjects = new Set();
 // 記録対象のセッションID
 let recordSessionId = null;
+let recordBaseTotalSeconds = 0;
 let recordSaveInFlight = false;
 let pendingNoticeEpoch = 0;
 let pendingRecordGate = 'unknown';
@@ -3560,12 +3500,15 @@ function showRecordDialog(sessionId, totalSeconds, recovered = false, pendingCou
   setButtonDisabled('btn-start', true);
   updateRecordRecoveryNotice(recovered, pendingCount);
   recordSessionId = sessionId;
+  recordBaseTotalSeconds = totalSeconds;
   setupRecordReview(sessionId, totalSeconds);
   recordSelectedSubjects = new Set(); // 選択状態をリセット
+  delete allocationEditors["record-allocation"];
+  refreshRecordAllocation();
 
   // 時間表示を設定
   const timeEl = document.getElementById('record-dialog-time');
-  if (timeEl) timeEl.textContent = formatSecondsJa(totalSeconds);
+  if (timeEl) timeEl.textContent = allocationTime(totalSeconds);
 
   // 前回の入力をリセット
   const memoEl = document.getElementById('record-memo');
@@ -3592,7 +3535,17 @@ function showRecordDialog(sessionId, totalSeconds, recovered = false, pendingCou
 // 教科ボタン選択ハンドラ（複数選択トグル式）
 // 押すと選択、もう一度押すと解除
 // -----------------------------------------------
+function refreshRecordAllocation(){
+  var total=recordReviewActive?recordReviewSeconds():recordBaseTotalSeconds;
+  var max=Math.min(6,Math.max(0,Math.floor(total/60)));
+  document.querySelectorAll('#record-subject-buttons [data-subject]').forEach(function(b){b.disabled=!recordSelectedSubjects.has(b.dataset.subject)&&recordSelectedSubjects.size>=max;b.title=b.disabled?'1教科に1分以上残せるよう、教科を減らしてください':'';});
+  var notice=document.getElementById('record-subject-limit');notice.textContent=max<6?'この学習時間では'+max+'教科まで選べます（1教科につき1分以上）':'';
+  allocationConfig('record-allocation',total,Array.from(recordSelectedSubjects));
+}
 function selectSubject(subject) {
+  if(recordSaveInFlight)return;
+  var max=Math.floor((recordReviewActive?recordReviewSeconds():recordBaseTotalSeconds)/60);
+  if(!recordSelectedSubjects.has(subject)&&recordSelectedSubjects.size>=max)return;
   if (recordSelectedSubjects.has(subject)) {
     // 選択済み → 解除
     recordSelectedSubjects.delete(subject);
@@ -3611,6 +3564,7 @@ function selectSubject(subject) {
       btn.classList.add('border-gray-200', 'text-gray-600');
     }
   }
+  refreshRecordAllocation();
 }
 
 // -----------------------------------------------
@@ -3649,6 +3603,8 @@ async function handleRecordSave() {
     return;
   }
 
+  const subjectAllocation=allocationRead('record-allocation');
+  if(!subjectAllocation){errEl.textContent='教科ごとの時間を選んでください。入力した分数は「この分数にする」で確定してください。';errEl.classList.remove('hidden');return;}
   recordSaveInFlight = true;
   setButtonDisabled('record-save-btn', true);
 
@@ -3660,7 +3616,8 @@ async function handleRecordSave() {
       body: JSON.stringify({
         session_id: sessionId,
         total_seconds: recordReviewActive ? recordReviewSeconds() : undefined,
-        subjects: Array.from(recordSelectedSubjects), // Set → 配列に変換して送信
+        subjects: Array.from(recordSelectedSubjects), // 選んだ順で最後の教科を自動計算
+        subject_allocations: subjectAllocation,
         memo: memo,
       }),
     });
@@ -4071,7 +4028,7 @@ function setupRecordReview(id,seconds){
 function recordReviewSeconds(){return recordReviewMinutes*60;}
 function renderRecordReviewTime(){
   document.getElementById('record-review-minutes').textContent=recordReviewMinutes;
-  document.getElementById('record-dialog-time').textContent=formatSecondsJa(recordReviewSeconds());
+  document.getElementById('record-dialog-time').textContent=allocationTime(recordReviewSeconds());
   document.getElementById('record-review-minus').disabled=recordReviewMinutes<=0;
   document.getElementById('record-review-plus').disabled=recordReviewSeconds()>=recordReviewOriginal;
 }
@@ -4079,8 +4036,11 @@ function adjustRecordMinutes(delta){
   if(recordSaveInFlight||!recordReviewActive||(delta!==-5&&delta!==5))return;
   recordReviewMinutes=Math.max(0,Math.min(Math.floor(recordReviewOriginal/60),recordReviewMinutes+delta));
   renderRecordReviewTime();
+  refreshRecordAllocation();
 }
 function updateTimerLimitNotice(elapsed){var warning=document.getElementById('timer-limit-warning');if(!warning){warning=document.createElement('p');warning.id='timer-limit-warning';warning.className='hidden bg-purple-50 text-purple-600 rounded-xl p-3 text-sm text-center mb-3';document.getElementById('timer-60min-warning').insertAdjacentElement('afterend',warning);}warning.textContent='自動停止まであと5分です（'+(timerLimit(timerState)/60)+'分モード）';warning.classList.toggle('hidden',elapsed<timerLimit(timerState)-300||elapsed>=timerLimit(timerState));}
+${allocationScript}
+${analysisScript}
 ${sessionDetailsScript}
 ${managementScript}
 </script>

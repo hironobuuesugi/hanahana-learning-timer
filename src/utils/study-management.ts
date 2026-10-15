@@ -22,7 +22,7 @@ export const snapshot = (s: StudySessionRecord & {
     status: s.status, started_at: s.started_at, original_started_at: s.original_started_at,
     study_date: s.study_date ?? null, total_seconds: s.total_seconds, subject: s.subject ?? null,
     memo: s.memo ?? null, auto_stopped: s.auto_stopped, auto_stop_seconds: s.auto_stop_seconds ?? null,
-    time_limit_seconds: sessionLimit(s),
+    time_limit_seconds: sessionLimit(s), allocation_version: s.allocation_version ?? 0, subject_allocations: s.subject_allocations ?? null,
 });
 export async function studySeconds(db: D1Database, s: StudySessionRecord, at = Date.now()) {
     if (s.status === 'frozen' || s.status === 'finished')
@@ -35,8 +35,8 @@ export async function studySeconds(db: D1Database, s: StudySessionRecord, at = D
     const paused = pauses.reduce((sum, p) => sum + Math.max(0, (p.resume_at ? utcMillis(p.resume_at) : at) - utcMillis(p.pause_at)), 0);
     return Math.min(sessionLimit(s), Math.max(0, Math.floor((at - utcMillis(s.started_at) - paused) / 1000)));
 }
-export function eventStatement(db: D1Database, actor: number, target: number, session: number | null, action: string, before: unknown, after: unknown, reason: string, token?: string) {
-    return db.prepare(`INSERT INTO management_events (actor_user_id,target_user_id,session_id,action,before_json,after_json,reason,occurred_at)
-    SELECT ?,?,?,?,?,?,?,? ${token ? 'WHERE EXISTS (SELECT 1 FROM study_sessions WHERE id = ? AND operation_token = ?)' : ''}`)
-        .bind(actor, target, session, action, JSON.stringify(before), JSON.stringify(after), reason, nowISO(), ...(token ? [session, token] : []));
+export function eventStatement(db: D1Database, actor: number, target: number, session: number | null, action: string, before: unknown, after: unknown, reason: string, token?: string, requestKey?: string) {
+    return db.prepare(`INSERT INTO management_events (actor_user_id,target_user_id,session_id,action,before_json,after_json,reason,occurred_at,request_key)
+    SELECT ?,?,?,?,?,?,?,?,? ${token ? 'WHERE EXISTS (SELECT 1 FROM study_sessions WHERE id = ? AND operation_token = ?)' : ''}`)
+        .bind(actor, target, session, action, JSON.stringify(before), JSON.stringify(after), reason, nowISO(), requestKey ?? null, ...(token ? [session, token] : []));
 }

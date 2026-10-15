@@ -6,7 +6,7 @@
   "engines": {
     "node": "24.21.0"
   },
-  "description": "花はな Learning Timer：先生管理・学習タイマー",
+  "description": "花はな Learning Timer：教科別時間配分・学習分析・先生管理",
   "scripts": {
     "check": "tsc --noEmit",
     "build": "vite build",

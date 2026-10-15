@@ -1,5 +1,5 @@
 name = "hanahana-learning-timer"
-pages_build_output_dir = "build/pages-finish-20261016/dist"
+pages_build_output_dir = "build/pages-subjects-20261016/dist"
 compatibility_date = "2026-04-01"
 compatibility_flags = ["http_headers_getsetcookie"]
 

@@ -1,5 +1,6 @@
 // /api/admin配下で既存の認証・先生権限チェックを受ける。
 import { Hono } from 'hono';
+import { saveAllocation, allocationError } from '../utils/subject-allocation';
 import type { Bindings, Variables, StudySessionRecord } from '../types';
 import { settleDue } from './timer';
 import { withSessionDetails } from '../utils/session-details';
@@ -66,13 +67,15 @@ management.post('/student/:studentUserId/records', async (c) => {
         return c.json({success:false,error:'操作をやり直してください'},400);
     const prior = await db.prepare("SELECT id FROM management_events WHERE request_key=? AND actor_user_id=? AND target_user_id=? AND action='record_add'").bind(requestKey,c.get('userId'),s.id).first();
     if (prior) return c.json({success:true,message:'この学習記録は保存済みです'});
+    const allocation = saveAllocation(b.subjects, b.total_seconds, b.subject_allocations);
+    if (!allocation) return c.json({success:false,error:allocationError},422);
     const nominal = new Date(b.study_date + 'T00:00:00+09:00').toISOString(), token = requestKey, now = nowISO();
-    const after = { study_date: b.study_date, total_seconds: b.total_seconds, subject, memo: b.memo.trim(), record_source: 'teacher' };
+    const after = { ...allocation, study_date: b.study_date, total_seconds: b.total_seconds, subject, memo: b.memo.trim(), record_source: 'teacher' };
     const result = await db.batch([
-        db.prepare(`INSERT INTO study_sessions(user_id,status,started_at,original_started_at,finished_at,total_seconds,subject,memo,study_date,record_source,operation_token,updated_at,saved_at)
-      SELECT ?,'finished',?,?,?, ?,?,?,?,'teacher',?,?,? WHERE EXISTS(SELECT 1 FROM users WHERE id=? AND archived_at IS NULL AND management_revision=?)
+        db.prepare(`INSERT INTO study_sessions(user_id,status,started_at,original_started_at,finished_at,total_seconds,subject,memo,study_date,record_source,operation_token,updated_at,saved_at,allocation_version,subject_allocations)
+      SELECT ?,'finished',?,?,?, ?,?,?,?,'teacher',?,?,?,?,? WHERE EXISTS(SELECT 1 FROM users WHERE id=? AND archived_at IS NULL AND management_revision=?)
       AND NOT EXISTS(SELECT 1 FROM management_events WHERE request_key=?)`)
-            .bind(s.id, nominal, nominal, now, b.total_seconds, subject, b.memo.trim(), b.study_date, token, now, now, s.id, s.management_revision,requestKey),
+            .bind(s.id, nominal, nominal, now, b.total_seconds, subject, b.memo.trim(), b.study_date, token, now, now, allocation.allocation_version, allocation.subject_allocations, s.id, s.management_revision,requestKey),
         db.prepare(`INSERT INTO management_events(actor_user_id,target_user_id,session_id,action,after_json,reason,occurred_at,request_key)
       SELECT ?,user_id,id,'record_add',?,?,?,? FROM study_sessions WHERE operation_token=? AND NOT EXISTS(SELECT 1 FROM management_events WHERE request_key=?)`)
             .bind(c.get('userId'), JSON.stringify(after), reasonText(b.reason), now,requestKey, token,requestKey),
@@ -86,17 +89,22 @@ management.post('/student/:studentUserId/records', async (c) => {
 });
 management.patch('/records/:id', async (c) => {
     const db = c.env.DB, id = positiveId(c.req.param('id')), b = await c.req.json().catch(() => null);
+    const requestKey=b?.request_id;
+    if(requestKey!==undefined && (typeof requestKey!=='string'||!/^[a-f0-9-]{36}$/i.test(requestKey)))return c.json({success:false,error:'操作をやり直してください'},400);
+    if(id&&requestKey){const prior=await db.prepare("SELECT id FROM management_events WHERE request_key=? AND actor_user_id=? AND session_id=? AND action='record_edit'").bind(requestKey,c.get('userId'),id).first();if(prior)return c.json({success:true,message:'この変更は保存済みです'});}
     const row = id ? await db.prepare('SELECT ss.* FROM study_sessions ss JOIN users u ON u.id=ss.user_id WHERE ss.id=? AND u.user_id != ?').bind(id, c.env.TEACHER_USER_ID).first<StudySessionRecord>() : null;
     if (!row || row.status !== 'finished' || !row.subject)
         return c.json({ success: false, error: '保存済み記録が見つかりません' }, 404);
     const subject = subjects(b?.subjects);
     if (!b || b.revision !== row.revision || !validDate(b.study_date) || b.study_date > jstToday() || !subject || !Number.isSafeInteger(b.total_seconds) || b.total_seconds < 300 || b.total_seconds > 86400 || typeof b.memo !== 'string' || !b.memo.trim() || b.memo.length > 500)
         return c.json({ success: false, error: '入力または記録の更新状態を確認してください。再読込が必要な場合があります' }, 409);
-    const token = crypto.randomUUID(), after = { ...snapshot(row), study_date: b.study_date, total_seconds: b.total_seconds, subject, memo: b.memo.trim() };
+    const allocation = saveAllocation(b.subjects, b.total_seconds, b.subject_allocations, row);
+    if (!allocation) return c.json({success:false,error:allocationError},422);
+    const token = crypto.randomUUID(), after = { ...snapshot(row), ...allocation, study_date: b.study_date, total_seconds: b.total_seconds, subject, memo: b.memo.trim() };
     const result = await db.batch([
-        db.prepare(`UPDATE study_sessions SET study_date=?,total_seconds=?,subject=?,memo=?,updated_at=?,revision=revision+1,operation_token=? WHERE id=? AND revision=? AND status='finished' AND subject IS NOT NULL`)
-            .bind(b.study_date, b.total_seconds, subject, b.memo.trim(), nowISO(), token, row.id, row.revision),
-        eventStatement(db, c.get('userId'), row.user_id, row.id, 'record_edit', snapshot(row), after, reasonText(b.reason), token),
+        db.prepare(`UPDATE study_sessions SET study_date=?,total_seconds=?,subject=?,memo=?,allocation_version=?,subject_allocations=?,updated_at=?,revision=revision+1,operation_token=? WHERE id=? AND revision=? AND status='finished' AND subject IS NOT NULL`)
+            .bind(b.study_date, b.total_seconds, subject, b.memo.trim(), allocation.allocation_version, allocation.subject_allocations, nowISO(), token, row.id, row.revision),
+        eventStatement(db, c.get('userId'), row.user_id, row.id, 'record_edit', snapshot(row), after, reasonText(b.reason), token, requestKey),
     ]);
     if (result[0].meta.changes !== 1)
         return c.json({ success: false, error: '別の操作で変更されました。再読込してください' }, 409);
@@ -169,11 +177,13 @@ management.post('/timers/:id/record', async (c) => {
     const seconds=b.total_seconds ?? row.total_seconds;
     if(!Number.isSafeInteger(seconds)||seconds<300||seconds>row.total_seconds)
         return c.json({success:false,error:'5分以上・元の未保存時間以下で指定してください'},422);
-    const token = crypto.randomUUID(), after = { ...snapshot(row), subject, memo: b.memo.trim(),total_seconds:seconds,auto_stop_seconds:row.auto_stopped?(row.auto_stop_seconds??row.total_seconds):row.auto_stop_seconds };
+    const allocation = saveAllocation(b.subjects, seconds, b.subject_allocations);
+    if (!allocation) return c.json({success:false,error:allocationError},422);
+    const token = crypto.randomUUID(), after = { ...snapshot(row), ...allocation, subject, memo: b.memo.trim(),total_seconds:seconds,auto_stop_seconds:row.auto_stopped?(row.auto_stop_seconds??row.total_seconds):row.auto_stop_seconds };
     const result = await db.batch([
-        db.prepare(`UPDATE study_sessions SET subject=?,memo=?,total_seconds=?,auto_stop_seconds=CASE WHEN auto_stopped=1 THEN COALESCE(auto_stop_seconds,total_seconds) ELSE auto_stop_seconds END,saved_at=COALESCE(saved_at,?),updated_at=?,revision=revision+1,operation_token=? WHERE id=? AND revision=? AND status='finished' AND subject IS NULL
+        db.prepare(`UPDATE study_sessions SET subject=?,memo=?,total_seconds=?,allocation_version=?,subject_allocations=?,auto_stop_seconds=CASE WHEN auto_stopped=1 THEN COALESCE(auto_stop_seconds,total_seconds) ELSE auto_stop_seconds END,saved_at=COALESCE(saved_at,?),updated_at=?,revision=revision+1,operation_token=? WHERE id=? AND revision=? AND status='finished' AND subject IS NULL
       AND id=(SELECT id FROM study_sessions WHERE user_id=? AND status='finished' AND subject IS NULL AND total_seconds>=300 ORDER BY finished_at,id LIMIT 1)`)
-            .bind(subject, b.memo.trim(),seconds, nowISO(), nowISO(), token, row.id, row.revision, row.user_id),
+            .bind(subject, b.memo.trim(),seconds, allocation.allocation_version, allocation.subject_allocations, nowISO(), nowISO(), token, row.id, row.revision, row.user_id),
         eventStatement(db, c.get('userId'), row.user_id, row.id, 'teacher_record', snapshot(row), after, reasonText(b.reason), token),
     ]);
     if (result[0].meta.changes !== 1)

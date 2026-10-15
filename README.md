@@ -12,7 +12,7 @@
 - `vite.config.ts`：Cloudflare Pages Advanced Modeの公式Honoビルド設定。
 - `wrangler.toml`：既存DB bindingと公開Workerの互換性設定。正式公開時はこの設定を確実に読み込ませます。
 
-Node.js 24.21.0と固定の依存関係を使用し、`npm run build:management`でビルドします。出力は `build/pages-finish-20261016/dist` の5ファイルです。旧r2出力を上書きしません。Mac側の履歴・保護コマンドは引き続き維持します。
+Node.js 24.21.0と固定の依存関係を使用し、`npm run build:management`でビルドします。出力は `build/pages-subjects-20261016/dist` の5ファイルです。旧r2出力を上書きしません。Mac側の履歴・保護コマンドは引き続き維持します。
 
 ## 本番運用
 
@@ -31,3 +31,7 @@ Node.js 24.21.0と固定の依存関係を使用し、`npm run build:management`
 [第1段階の公開・検証引き継ぎ](handoff/stage1-release-20261016.txt) を参照してください。教科別の時間配分変更・教科別分析・先生メッセージ機能は含みません。
 
 2026-10-16に正式公開を完了しました。Production deploymentは `830b9458-7bed-484f-9ed2-457dd21eeedf`、ソース保存コミットは `43281d872b8f3f3db8dd027141dbf57d7e54344d` です。本人の先生ログインと本番表示を確認済みです。既存URL・DB・アカウント・記録・Secretを維持しています。
+
+## 第2段階：教科別配分と学習分析（2026-10-16）
+
+1教科はそのまま、複数教科は最後以外の時間を指定して秒数も正確に保存します。先生と本人の月別・累計分析を共通ルールで表示し、過去の均等配分は書き換えません。承認済みの生徒画面の整列・学習のヒント・配分文言・「一つ戻る」を含みます。必要な0013だけを個別確認し、0009〜0012や自動migrationは実行しないでください。[第2段階の公開引き継ぎ](handoff/subjects-release-20261016.txt)を参照してください。

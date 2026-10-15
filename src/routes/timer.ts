@@ -1,5 +1,6 @@
 // 花はな Learning Timer：本人用タイマー。時間上限と履歴をサーバーで保全する。
 import { Hono } from 'hono';
+import { saveAllocation, allocationError } from '../utils/subject-allocation';
 import { authMiddleware } from '../middleware/auth';
 import type { Bindings, Variables, StudySessionRecord, TimerStateResponse } from '../types';
 import { eventStatement, nowISO, sessionLimit, snapshot, studySeconds, subjects } from '../utils/study-management';
@@ -150,8 +151,10 @@ timer.post('/record', async (c) => {
     }>();
     if (oldest?.id !== s.id)
         return c.json({ success: false, error: '古い未保存記録から保存してください' }, 409);
-    const after = { ...snapshot(s), subject, memo: b.memo.trim(), total_seconds: final, auto_stop_seconds: s.auto_stopped ? (s.auto_stop_seconds ?? s.total_seconds) : s.auto_stop_seconds };
-    const r = await transition(db, s, 'subject=?,memo=?,total_seconds=?,saved_at=COALESCE(saved_at,?),auto_stop_seconds=CASE WHEN auto_stopped=1 THEN COALESCE(auto_stop_seconds,total_seconds) ELSE auto_stop_seconds END', [subject, b.memo.trim(), final, nowISO()], token => [
+    const allocation = saveAllocation(b.subjects, final, b.subject_allocations);
+    if (!allocation) return c.json({success:false,error:allocationError},422);
+    const after = { ...snapshot(s), ...allocation, subject, memo: b.memo.trim(), total_seconds: final, auto_stop_seconds: s.auto_stopped ? (s.auto_stop_seconds ?? s.total_seconds) : s.auto_stop_seconds };
+    const r = await transition(db, s, 'subject=?,memo=?,total_seconds=?,allocation_version=?,subject_allocations=?,saved_at=COALESCE(saved_at,?),auto_stop_seconds=CASE WHEN auto_stopped=1 THEN COALESCE(auto_stop_seconds,total_seconds) ELSE auto_stop_seconds END', [subject, b.memo.trim(), final, allocation.allocation_version, allocation.subject_allocations, nowISO()], token => [
         eventStatement(db, user, user, s.id, s.auto_stopped && final !== s.total_seconds ? 'time_review' : 'record_save', snapshot(s), after, '', token)
     ]);
     return r ? c.json({ success: true, message: '記録しました！', data: { session_id: s.id } }) : c.json(conflict(), 409);

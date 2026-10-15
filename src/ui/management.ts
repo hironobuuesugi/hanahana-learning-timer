@@ -1,4 +1,5 @@
 import { sharedTestdateDialog, sharedTestdateScript } from './shared-testdate';
+import { teacherSubjectPanel } from './subject-analysis';
 // 既存の花はなカード・配色・ゴシック体を引き継ぐ先生画面。
 export const managementHeader = String.raw`
 <div id="page-admin" class="page"><div class="min-h-screen" style="background:#fdf2f8">
@@ -6,12 +7,13 @@ export const managementHeader = String.raw`
 <button onclick="showPage('page-home')" class="text-sm text-gray-500 py-2">‹ ホーム</button>
 <span class="font-bold text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-purple-500">🌸 先生管理画面</span><button onclick="refreshManagement()" class="text-sm text-indigo-500 py-2">更新</button></div></header>
 <main class="max-w-5xl mx-auto px-4 py-6 space-y-4">
-<nav class="grid grid-cols-2 sm:grid-cols-5 gap-2" aria-label="先生管理メニュー">
+<nav class="grid grid-cols-2 sm:grid-cols-3 gap-2" aria-label="先生管理メニュー">
 <button data-management="tab" data-tab="students" class="management-tab">👩‍🎓 生徒一覧</button>
 <button data-management="tab" data-tab="timers" class="management-tab">⏱ タイマー状況 <span id="management-new-badge" class="hidden"></span></button>
 <button data-management="tab" data-tab="accounts" class="management-tab">🌷 アカウント</button>
 <button data-management="tab" data-tab="history" class="management-tab">📝 変更履歴</button>
-<button data-management="tab" data-tab="testdate" class="management-tab">📅 共通テスト日</button></nav>
+<button data-management="tab" data-tab="testdate" class="management-tab">📅 共通テスト日</button>
+<button data-management="tab" data-tab="subjects" class="management-tab">📊 教科別学習</button></nav>
 <div id="management-error" role="alert" class="hidden bg-red-50 text-red-600 rounded-xl p-4 text-sm"></div>
 <section id="management-students" class="management-panel space-y-4">
 <div class="bg-white rounded-2xl shadow-sm p-4 sm:p-5"><div class="flex flex-wrap items-center justify-between gap-3">
@@ -32,6 +34,7 @@ export const managementHeader = String.raw`
 <div id="management-testdate-summary" class="rounded-xl bg-purple-50 p-4 mt-4 text-sm text-gray-600"></div>
 <div class="flex flex-wrap gap-2 mt-4"><button id="management-testdate-edit" data-management="testdate-edit" class="management-primary">日付設定</button><button id="management-testdate-visibility" data-management="testdate-visibility" class="management-small" disabled>表示にする</button><button id="management-testdate-delete" data-management="testdate-delete" class="management-small" disabled>削除</button></div>
 <p class="text-xs text-gray-400 mt-4">非表示は日付を保持します。削除は日付設定を解除します。以前の個別設定は再表示されません。</p></section>
+${teacherSubjectPanel}
 <section id="management-detail" class="hidden space-y-4"><div class="flex flex-wrap items-center justify-between gap-3"><button data-management="back" class="management-small">‹ 生徒一覧に戻る</button><button data-management="add" class="management-primary">＋ 学習記録を追加</button></div>
 <div class="bg-white rounded-2xl shadow-sm p-4"><label class="text-sm text-gray-600" for="admin-student-select">生徒の切り替え</label><select id="admin-student-select" onchange="openManagementStudent(this.value)" class="management-input w-full mt-2"><option value="">-- 生徒を選択 --</option></select></div><div id="admin-loading" class="hidden text-center py-8 text-gray-500">🌸 読み込み中…</div>
 `
@@ -99,6 +102,8 @@ async function refreshManagement() { managementEl('management-error').classList.
         await managementLoadTestdate();
     if (managementTab === 'history')
         await managementHistory(false);
+    if (managementTab === 'subjects')
+        await loadTeacherSubjectAnalysis();
     await managementBadge();
 }
 catch (e) {
@@ -118,7 +123,7 @@ catch (e) {
     managementError(e);
 } }
 async function managementLoadRecords(more) { var user = managementStudent, epoch = managementEpoch; var j = await managementRequest('/student/' + encodeURIComponent(user) + '/records?offset=' + (more ? managementRecords.length : 0)); if (epoch !== managementEpoch || user !== managementStudent)
-    return; managementRecords = more ? managementRecords.concat(j.data) : j.data; managementEl('admin-sessions').innerHTML = managementRecords.map(function (s) { return '<div class="py-3 border-b border-gray-100"><div class="flex flex-wrap justify-between gap-2"><div><span class="text-sm text-gray-500">' + escapeHtml(managementDate(s)) + '</span> <span class="font-medium text-gray-700 text-sm">' + escapeHtml(formatSubjects(s.subject)) + '</span></div><span class="font-bold text-indigo-500">' + managementMinutes(s.total_seconds) + '</span></div><p class="text-sm text-gray-500 mt-2" style="white-space:pre-wrap;overflow-wrap:anywhere">' + escapeHtml(s.memo || '') + '</p>' + (s.auto_stopped ? '<p class="text-xs text-amber-600 mt-2">' + escapeHtml(autoHistoryLabel(s)) + '</p>' : '') + sessionFactsHtml(s,true) + '<div class="flex gap-2 mt-3"><button data-management="edit" data-id="' + s.id + '" class="management-small">編集</button><button data-management="delete-record" data-id="' + s.id + '" class="management-small text-red-500">削除</button></div></div>'; }).join('') || '<p class="text-sm text-gray-400">保存済みの記録はありません。</p>'; if (j.has_more)
+    return; managementRecords = more ? managementRecords.concat(j.data) : j.data; managementEl('admin-sessions').innerHTML = managementRecords.map(function (s) { return '<div class="py-3 border-b border-gray-100"><div class="flex flex-wrap justify-between gap-2"><div><span class="text-sm text-gray-500">' + escapeHtml(managementDate(s)) + '</span> <span class="font-medium text-gray-700 text-sm">' + escapeHtml(formatSubjects(s.subject)) + '</span></div><span class="font-bold text-indigo-500">' + allocationTime(s.total_seconds) + '</span></div><p class="text-sm text-gray-500 mt-2" style="white-space:pre-wrap;overflow-wrap:anywhere">' + escapeHtml(s.memo || '') + '</p>' + (s.auto_stopped ? '<p class="text-xs text-amber-600 mt-2">' + escapeHtml(autoHistoryLabel(s)) + '</p>' : '') + allocationRecordHtml(s) + sessionFactsHtml(s,true) + '<div class="flex gap-2 mt-3"><button data-management="edit" data-id="' + s.id + '" class="management-small">編集</button><button data-management="delete-record" data-id="' + s.id + '" class="management-small text-red-500">削除</button></div></div>'; }).join('') || '<p class="text-sm text-gray-400">保存済みの記録はありません。</p>'; if (j.has_more)
     managementEl('admin-sessions').insertAdjacentHTML('beforeend', '<button data-management="records-more" class="management-small mt-3">以前の記録を読む</button>'); }
 async function managementLoadTimers() {
   var epoch=managementEpoch,j=await managementRequest('/timers');if(epoch!==managementEpoch)return;
@@ -158,8 +163,26 @@ async function managementHistory(more) { if (!more)
     el.insertAdjacentHTML('beforeend', html);
 else
     el.innerHTML = html; managementHistoryOffset += j.data.length; managementEl('management-history-more').classList.toggle('hidden', !j.has_more); }
-function managementSnapshotLabel(s) { return [s.display_message?'表示メッセージ：'+s.display_message:'',s.message_visible!=null?(s.message_visible?'メッセージ表示':'メッセージ非表示'):'',s.test_date ? 'テスト日 '+s.test_date : '',s.is_visible!=null?(s.is_visible?'表示':'非表示'):'',s.study_date || '', s.subject ? formatSubjects(s.subject) : '', s.total_seconds != null ? managementMinutes(s.total_seconds) : '', s.memo || ''].filter(Boolean).join(' ／ ') || '—'; }
+function managementSnapshotLabel(s) { return [allocationRecordText(s),s.display_message?'表示メッセージ：'+s.display_message:'',s.message_visible!=null?(s.message_visible?'メッセージ表示':'メッセージ非表示'):'',s.test_date ? 'テスト日 '+s.test_date : '',s.is_visible!=null?(s.is_visible?'表示':'非表示'):'',s.study_date || '', s.subject ? formatSubjects(s.subject) : '', s.total_seconds != null ? allocationTime(s.total_seconds) : '', s.memo || ''].filter(Boolean).join(' ／ ') || '—'; }
 function managementSubjectFields(values) { return '<div class="management-subjects">' + Object.keys(SUBJECT_LABELS_ADMIN).map(function (k) { return '<label><input type="checkbox" name="subjects" value="' + k + '" ' + (values && values.includes(k) ? 'checked' : '') + '> ' + SUBJECT_LABELS_ADMIN[k] + '</label>'; }).join('') + '</div>'; }
+var managementAllocationState=null;
+function setupManagementAllocation(row,action){
+  managementAllocationState={row:row,action:action,force:false,codes:row&&row.subject?row.subject.split(','):[],preserve:false};
+  delete allocationEditors['management-allocation'];refreshManagementAllocation(true);
+}
+function refreshManagementAllocation(initial){
+  var st=managementAllocationState;if(!st)return;var f=new FormData(managementEl('management-form')),selected=f.getAll('subjects');
+  st.codes=st.codes.filter(function(c){return selected.includes(c)}).concat(selected.filter(function(c){return !st.codes.includes(c)}));
+  var total=Math.round(Number(f.get('minutes'))*60),row=st.row;
+  st.preserve=st.action==='edit'&&row&&row.allocation_version!==1&&!st.force&&row.subject===st.codes.join(',')&&row.total_seconds===total;
+  var saved=initial&&row&&row.allocation_version===1?JSON.parse(row.subject_allocations):undefined;
+  allocationConfig('management-allocation',total,st.codes,saved);
+  if(st.preserve)managementEl('management-allocation').classList.add('hidden');
+  managementEl('management-allocation-legacy-note').classList.toggle('hidden',!(st.preserve&&st.codes.length>1));
+  var max=Math.floor(total/60);managementEl('management-form').querySelectorAll('[name="subjects"]').forEach(function(input){input.disabled=!input.checked&&st.codes.length>=max;});
+}
+managementEl('management-form').addEventListener('change',function(e){if(e.target.matches('[name="subjects"]'))refreshManagementAllocation();});
+managementEl('management-form').addEventListener('input',function(e){if(e.target.matches('[name="minutes"]'))refreshManagementAllocation();});
 function managementOpenDialog(action, row) {
     managementEl('management-dialog-cancel').textContent = 'キャンセル';
     var d = managementEl('management-dialog');
@@ -174,7 +197,7 @@ function managementOpenDialog(action, row) {
     if (['add', 'edit', 'pending-record'].includes(action)) {
         if (action !== 'pending-record')
             html += '<label>学習日</label><input class="management-input" type="date" name="study_date" required max="' + new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10) + '" value="' + (row ? managementDate(row) : new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10)) + '">';
-        html += '<label>教科（複数選択できます）</label>' + managementSubjectFields(row && row.subject ? row.subject.split(',') : []) + '<label>学習時間（分）</label><input class="management-input" type="number" name="minutes" min="5" max="' + (action === 'pending-record' ? row.total_seconds / 60 : 1440) + '" step="any" required value="' + (row ? row.total_seconds / 60 : 50) + '" ' + '' + '><label>学習内容・メモ</label><textarea class="management-input" name="memo" maxlength="500" rows="3" required>' + escapeHtml(row && row.memo || '') + '</textarea><label>操作理由' + (action === 'pending-record' ? '（必須）' : '（任意）') + '</label><input class="management-input" name="reason" maxlength="500" ' + (action === 'pending-record' ? 'required' : '') + '>';
+        html += '<label>教科（複数選択できます）</label>' + managementSubjectFields(row && row.subject ? row.subject.split(',') : []) + '<label>学習時間（分）</label><input class="management-input" type="number" name="minutes" min="5" max="' + (action === 'pending-record' ? row.total_seconds / 60 : 1440) + '" step="any" required value="' + (row ? row.total_seconds / 60 : 50) + '" ' + '' + '><div id="management-allocation-legacy-note" class="hidden rounded-xl bg-purple-50 text-xs text-gray-500 p-3 mt-3">この記録は従来の均等配分です。内容だけの変更では配分を変えません。<button type="button" data-management="allocation-enable" class="text-purple-600 font-bold block py-2">教科ごとの時間を指定する</button></div><div id="management-allocation" class="hidden mt-3"></div><label>学習内容・メモ</label><textarea class="management-input" name="memo" maxlength="500" rows="3" required>' + escapeHtml(row && row.memo || '') + '</textarea><label>操作理由' + (action === 'pending-record' ? '（必須）' : '（任意）') + '</label><input class="management-input" name="reason" maxlength="500" ' + (action === 'pending-record' ? 'required' : '') + '>';
     }
     if (action === 'delete-record')
         html += '<p class="text-sm text-gray-500 mt-3">' + escapeHtml(managementDate(row) + ' ／ ' + formatSubjects(row.subject) + ' ／ ' + managementMinutes(row.total_seconds)) + '</p><label>削除理由</label><input class="management-input" name="reason" maxlength="500" required>';
@@ -191,6 +214,7 @@ function managementOpenDialog(action, row) {
     if (action === 'delete')
         html += '<p class="text-sm text-red-500 mt-3">完全削除は復旧できません。先生自身のログインパスワードで再認証します。</p><label>先生のログインパスワード</label><input class="management-input" type="password" name="password" autocomplete="current-password" required>';
     managementEl('management-dialog-body').innerHTML = html;
+    if(['add','edit','pending-record'].includes(action))setupManagementAllocation(row,action);
     if (!d.open)
         d.showModal();
 }
@@ -206,6 +230,11 @@ async function managementSubmit(e) {
             err.textContent = '教科を1つ以上選択してください';
             err.classList.remove('hidden');
             return;
+        }
+        if(['add','edit','pending-record'].includes(st.action)){
+            b.subjects=managementAllocationState.codes.slice();b.subject=b.subjects.join(',');
+            if(!managementAllocationState.preserve){var allocation=allocationRead('management-allocation');if(!allocation){err.textContent='教科ごとの時間を選び、入力した分数を確定してください。';err.classList.remove('hidden');return;}b.subject_allocations=allocation;b.allocation_version=1;}
+            else b.allocation_version=0;
         }
         st.body = b;
         st.confirmed = true;
@@ -266,6 +295,9 @@ document.addEventListener('click', async function (e) { var btn = e.target.close
         managementStudent = null;
         await managementSwitch(btn.dataset.tab);
     }
+    else if(action==='subject-analysis-detail'){teacherSubjectFocus=btn.dataset.user;await loadTeacherSubjectAnalysis();}
+    else if(action==='subject-analysis-back'){teacherSubjectFocus=null;await loadTeacherSubjectAnalysis();}
+    else if(action==='allocation-enable'){managementAllocationState.force=true;refreshManagementAllocation();}
     else if(action.indexOf('testdate-')===0)
         openTestdateDialog(action);
     else if(action==='attention-student')
